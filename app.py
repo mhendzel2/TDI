@@ -220,29 +220,34 @@ def main():
     batch_size = st.sidebar.selectbox("Batch Size", [16, 32, 64], index=1)
     
     # Load data
-    df = None
+    # Use session state to store the dataframe across reruns
+    if 'df' not in st.session_state:
+        st.session_state.df = None
     
     if data_source == "Upload CSV File":
         st.subheader("📁 Upload Stock Data")
         st.info("Upload a CSV file with columns: Date, Open, High, Low, Close, Volume")
         
-        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+        # Add a key to the uploader to help Streamlit manage state
+        uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="file_uploader")
         
         if uploaded_file is not None:
             try:
-                df = pd.read_csv(uploaded_file)
-                st.success(f"Data loaded successfully! Shape: {df.shape}")
+                st.session_state.df = pd.read_csv(uploaded_file)
+                st.success(f"Data loaded successfully! Shape: {st.session_state.df.shape}")
                 
                 # Validate required columns
                 required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-                missing_columns = [col for col in required_columns if col not in df.columns]
+                missing_columns = [col for col in required_columns if col not in st.session_state.df.columns]
                 
                 if missing_columns:
                     st.error(f"Missing required columns: {missing_columns}")
+                    st.session_state.df = None
                     return
                 
             except Exception as e:
                 st.error(f"Error loading file: {str(e)}")
+                st.session_state.df = None
                 return
     
     else:
@@ -250,16 +255,19 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            num_days = st.number_input("Number of Days", 500, 2000, 1000)
+            num_days = st.number_input("Number of Days", 500, 2000, 1000, key="num_days")
         with col2:
-            start_price = st.number_input("Starting Price", 50, 500, 100)
+            start_price = st.number_input("Starting Price", 50, 500, 100, key="start_price")
         
-        if st.button("Generate Data"):
+        if st.button("Generate Data", key="generate_data"):
             with st.spinner("Generating synthetic stock data..."):
-                df = generate_synthetic_stock_data(num_days, start_price)
-                st.success(f"Synthetic data generated! Shape: {df.shape}")
+                st.session_state.df = generate_synthetic_stock_data(num_days, start_price)
+                st.success(f"Synthetic data generated! Shape: {st.session_state.df.shape}")
     
-    if df is not None:
+    if st.session_state.df is not None:
+        # Assign the DataFrame from session state to a local variable for convenience
+        df = st.session_state.df
+
         # Display data preview
         st.subheader("📊 Data Preview")
         st.dataframe(df.head(10))
