@@ -23,24 +23,21 @@ class PositionalEmbedding(layers.Layer):
     def __init__(self, sequence_length, **kwargs):
         super().__init__(**kwargs)
         self.sequence_length = sequence_length
+        self.position_embedding = None
         
-    def call(self, inputs):
-        positions = tf.range(start=0, limit=self.sequence_length, delta=1)
-        positions = tf.cast(positions, tf.float32)
-        
-        # Create positional encoding matrix
-        batch_size = tf.shape(inputs)[0]
-        d_model = tf.shape(inputs)[-1]
-        
-        # Simple learned positional embedding
-        position_embedding = self.add_weight(
+    def build(self, input_shape):
+        # Create positional embedding weights during build phase
+        d_model = input_shape[-1]
+        self.position_embedding = self.add_weight(
             name="position_embedding",
             shape=(self.sequence_length, d_model),
             initializer="uniform",
             trainable=True
         )
+        super().build(input_shape)
         
-        return inputs + position_embedding
+    def call(self, inputs):
+        return inputs + self.position_embedding
 
 def transformer_encoder(inputs, head_size, num_heads, ff_dim, dropout=0.1):
     """Single Transformer encoder block"""
@@ -252,7 +249,6 @@ def main():
                     st.session_state.df = None
                 else:
                     st.sidebar.success("✅ CSV file validated successfully!")
-                    return
                 
             except Exception as e:
                 st.error(f"Error loading file: {str(e)}")
