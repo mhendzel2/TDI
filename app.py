@@ -124,9 +124,19 @@ def generate_synthetic_stock_data(num_days=1000, start_price=100):
 def fetch_market_indices(start_date, end_date):
     """Fetch SPX and NASDAQ indices data"""
     try:
+        st.info("Fetching market indices data...")
+        
+        # Add some buffer days to ensure we get data
+        start_date_buffer = start_date - pd.Timedelta(days=10)
+        end_date_buffer = end_date + pd.Timedelta(days=5)
+        
         # Fetch S&P 500 (^GSPC) and NASDAQ (^IXIC)
-        spx = yf.download('^GSPC', start=start_date, end=end_date, progress=False)
-        nasdaq = yf.download('^IXIC', start=start_date, end=end_date, progress=False)
+        spx = yf.download('^GSPC', start=start_date_buffer, end=end_date_buffer, progress=False)
+        nasdaq = yf.download('^IXIC', start=start_date_buffer, end=end_date_buffer, progress=False)
+        
+        if spx.empty or nasdaq.empty:
+            st.warning("No market data available for the given date range")
+            return None, None
         
         # Reset index to make Date a column
         spx = spx.reset_index()
@@ -136,9 +146,12 @@ def fetch_market_indices(start_date, end_date):
         spx_data = spx[['Date', 'Close']].rename(columns={'Close': 'SPX_Close'})
         nasdaq_data = nasdaq[['Date', 'Close']].rename(columns={'Close': 'NASDAQ_Close'})
         
+        st.success(f"✅ Successfully fetched market data: SPX ({len(spx_data)} days), NASDAQ ({len(nasdaq_data)} days)")
+        
         return spx_data, nasdaq_data
     except Exception as e:
-        st.warning(f"Could not fetch market indices: {str(e)}")
+        st.error(f"Could not fetch market indices: {str(e)}")
+        st.info("Will proceed without market indices data")
         return None, None
 
 def create_volume_features(df):
@@ -181,8 +194,8 @@ def add_market_context_features(df, include_indices=True, enhance_volume=True):
                 enhanced_df = enhanced_df.merge(nasdaq_data, on='Date', how='left')
                 
                 # Forward fill missing values
-                enhanced_df['SPX_Close'] = enhanced_df['SPX_Close'].fillna(method='ffill')
-                enhanced_df['NASDAQ_Close'] = enhanced_df['NASDAQ_Close'].fillna(method='ffill')
+                enhanced_df['SPX_Close'] = enhanced_df['SPX_Close'].fillna(method='ffill').fillna(enhanced_df['SPX_Close'].bfill())
+                enhanced_df['NASDAQ_Close'] = enhanced_df['NASDAQ_Close'].fillna(method='ffill').fillna(enhanced_df['NASDAQ_Close'].bfill())
                 
                 # Create relative performance features
                 enhanced_df['Stock_vs_SPX'] = enhanced_df['Close'] / enhanced_df['SPX_Close']
@@ -426,14 +439,18 @@ def main():
     batch_size = st.sidebar.selectbox("Batch Size", [16, 32, 64], index=1)
     
     # Enhanced features
-    st.sidebar.subheader("Enhanced Features")
-    include_market_indices = st.sidebar.checkbox("Include SPX & NASDAQ", value=False, 
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🚀 Enhanced Features")
+    st.sidebar.markdown("*Boost prediction accuracy with additional market context*")
+    
+    include_market_indices = st.sidebar.checkbox("📊 Include SPX & NASDAQ", value=False, 
                                                 help="Add S&P 500 and NASDAQ indices for market context")
-    enhance_volume_features = st.sidebar.checkbox("Enhanced Volume Features", value=True,
+    enhance_volume_features = st.sidebar.checkbox("📈 Enhanced Volume Features", value=True,
                                                  help="Add volume moving averages, ratios, and momentum")
     
     # Model type selection
-    model_type = st.sidebar.radio("Model Configuration:", 
+    st.sidebar.markdown("---")
+    model_type = st.sidebar.radio("🎯 Model Configuration:", 
                                 ["Basic Model (OHLCV only)", 
                                  "Enhanced Model (with selected features)"],
                                 help="Choose between basic model or enhanced model with additional features")
@@ -504,6 +521,18 @@ def main():
             with st.spinner("Generating synthetic stock data..."):
                 st.session_state.df = generate_synthetic_stock_data(num_days, start_price)
                 st.success(f"Synthetic data generated! Shape: {st.session_state.df.shape}")
+                
+                # Show a preview of available features when using enhanced model
+                if model_type == "Enhanced Model (with selected features)":
+                    st.info("💡 **Enhanced features available with synthetic data:**")
+                    features_available = ["✅ Enhanced Volume Features"]
+                    if not include_market_indices:
+                        features_available.append("❌ Market Indices (not available with synthetic data)")
+                    else:
+                        features_available.append("❌ Market Indices (would be available with real CSV data)")
+                    
+                    for feature in features_available:
+                        st.write(feature)
     
     # Check if data is available for training
     if st.session_state.df is None:
@@ -515,10 +544,43 @@ def main():
         
         # Debug info
         st.sidebar.success(f"✅ Data loaded: {df.shape[0]} rows")
+        
+        # Show current configuration
+        if model_type == "Enhanced Model (with selected features)":
+            config_info = "🔧 **Current Configuration:**\n"
+            config_info += f"- Model: Enhanced\n"
+            config_info += f"- Market Indices: {'✅' if include_market_indices else '❌'}\n"
+            config_info += f"- Volume Features: {'✅' if enhance_volume_features else '❌'}\n"
+            st.sidebar.info(config_info)
+        else:
+            st.sidebar.info("🔧 **Current Configuration:**\n- Model: Basic (OHLCV only)")
 
         # Display data preview
         st.subheader("📊 Data Preview")
         st.dataframe(df.head(10))
+        
+        # Test market data fetching if enhanced features are enabled
+        if st.session_state.get('show_test_market_data', False):
+            st.subheader("🧪 Market Data Test")
+            if st.button("Test Market Data Fetch"):
+                if 'Date' in df.columns:
+                    start_date = pd.to_datetime(df['Date'].min())
+                    end_date = pd.to_datetime(df['Date'].max())
+                    spx_data, nasdaq_data = fetch_market_indices(start_date, end_date)
+                    if spx_data is not None:
+                        st.success("Market data fetching working correctly!")
+                        st.write("SPX sample:", spx_data.head())
+                        st.write("NASDAQ sample:", nasdaq_data.head())
+                    else:
+                        st.error("Market data fetching failed")
+                else:
+                    st.warning("No Date column found for market data test")
+        
+        # Toggle for test mode
+        if st.checkbox("🔧 Show Market Data Test", value=False):
+            st.session_state['show_test_market_data'] = True
+        else:
+            st.session_state['show_test_market_data'] = False
         
         # Display basic statistics
         st.subheader("📈 Data Statistics")
@@ -734,16 +796,22 @@ def main():
                 st.metric("Predicted Change", f"{price_change_pct:.2f}%")
             
             # Future Price Predictions
+            st.markdown("---")
             st.subheader("📈 Future Price Predictions")
+            st.info("Configure the prediction settings below and click 'Generate Future Predictions' to forecast stock prices.")
             
             # Controls for future predictions
             col1, col2 = st.columns(2)
             with col1:
-                future_days = st.slider("Days to Predict", 7, 90, 30, key="future_days")
+                future_days = st.slider("Days to Predict", 7, 90, 30, key="future_days", 
+                                       help="Number of days into the future to predict")
             with col2:
-                historical_context_days = st.slider("Historical Context Days", 30, 200, 100, key="context_days")
+                historical_context_days = st.slider("Historical Context Days", 30, 200, 100, key="context_days",
+                                                   help="Number of historical days to show for context in the chart")
             
-            if st.button("🔮 Generate Future Predictions", type="secondary"):
+            # Make the button more prominent
+            st.markdown("### 🔮 Generate Predictions")
+            if st.button("🔮 Generate Future Predictions", type="secondary", use_container_width=True):
                 with st.spinner(f"Predicting stock prices for the next {future_days} days..."):
                     # Get the last sequence for prediction
                     last_sequence_scaled = X_test[-1]  # This is already scaled
