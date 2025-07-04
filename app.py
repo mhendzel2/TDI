@@ -287,7 +287,8 @@ def load_and_preprocess_data(df):
     
     # Scale target (Close price) separately for inverse transformation
     target_data = df[['Close']].values
-    scaled_target = scaler_target.fit_transform(target_data)
+    scaler_target.fit(target_data)
+    scaled_target = scaler_target.transform(target_data)
     
     return scaled_data, scaler_features, scaler_target, df
 
@@ -415,6 +416,13 @@ def plot_future_predictions(historical_prices, future_predictions, num_historica
     
     return fig
 
+def create_download_link(df, filename="stock_data.csv"):
+    """Create a download link for the dataframe"""
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">📥 Download CSV</a>'
+    return href
+
 # Streamlit App
 def main():
     st.title("🔮 Stock Price Prediction with Transformer Model")
@@ -426,7 +434,7 @@ def main():
     # Data source selection
     data_source = st.sidebar.radio(
         "Select Data Source:",
-        ["Upload CSV File", "Generate Synthetic Data"]
+        ["Upload CSV File", "Fetch Market Data (yfinance)", "Generate Synthetic Data"]
     )
     
     # Model hyperparameters
@@ -508,6 +516,24 @@ def main():
                 st.error(f"Error loading file: {str(e)}")
                 st.session_state.df = None
     
+    elif data_source == "Fetch Market Data (yfinance)":
+        # Display ticker selection interface
+        has_tickers = display_ticker_data_interface()
+        
+        # Show enhanced features info for real market data
+        if has_tickers and model_type == "Enhanced Model (with selected features)":
+            st.info("💡 **Enhanced features available with real market data:**")
+            features_available = []
+            if enhance_volume_features:
+                features_available.append("✅ Enhanced Volume Features")
+            if include_market_indices:
+                features_available.append("✅ Market Indices (SPX, NASDAQ)")
+            else:
+                features_available.append("⚠️ Market Indices (enable in sidebar for market context)")
+            
+            for feature in features_available:
+                st.write(feature)
+    
     else:
         st.subheader("🎲 Generate Synthetic Data")
         col1, col2 = st.columns(2)
@@ -545,6 +571,21 @@ def main():
         # Debug info
         st.sidebar.success(f"✅ Data loaded: {df.shape[0]} rows")
         
+        # Show current ticker info if available
+        if hasattr(st.session_state, 'current_ticker'):
+            st.sidebar.info(f"📊 Current Ticker: **{st.session_state.current_ticker}**")
+            
+            # Add quick stats
+            current_price = df['Close'].iloc[-1]
+            price_change = df['Close'].iloc[-1] - df['Close'].iloc[-2] if len(df) > 1 else 0
+            price_change_pct = (price_change / df['Close'].iloc[-2]) * 100 if len(df) > 1 and df['Close'].iloc[-2] != 0 else 0
+            
+            st.sidebar.metric(
+                "Current Price", 
+                f"${current_price:.2f}",
+                f"{price_change:+.2f} ({price_change_pct:+.2f}%)"
+            )
+        
         # Show current configuration
         if model_type == "Enhanced Model (with selected features)":
             config_info = "🔧 **Current Configuration:**\n"
@@ -557,6 +598,23 @@ def main():
 
         # Display data preview
         st.subheader("📊 Data Preview")
+        
+        # Add download option and ticker info
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            if hasattr(st.session_state, 'current_ticker'):
+                st.write(f"**Data for: {st.session_state.current_ticker}**")
+        with col2:
+            if st.button("📥 Download Data", help="Download current dataset as CSV"):
+                filename = f"{st.session_state.current_ticker}_data.csv" if hasattr(st.session_state, 'current_ticker') else "stock_data.csv"
+                csv = df.to_csv(index=False)
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name=filename,
+                    mime="text/csv"
+                )
+        
         st.dataframe(df.head(10))
         
         # Test market data fetching if enhanced features are enabled
@@ -599,11 +657,31 @@ def main():
         st.subheader("📉 Price History")
         fig, ax = plt.subplots(figsize=(12, 6))
         ax.plot(df.index, df['Close'])
-        ax.set_title("Historical Closing Prices")
+        
+        # Add ticker name to title if available
+        title = "Historical Closing Prices"
+        if hasattr(st.session_state, 'current_ticker'):
+            title = f"Historical Closing Prices - {st.session_state.current_ticker}"
+        
+        ax.set_title(title)
         ax.set_xlabel("Days")
-        ax.set_ylabel("Price")
+        ax.set_ylabel("Price ($)")
         ax.grid(True, alpha=0.3)
+        
+        # Format y-axis to show dollar signs
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:.2f}'))
+        
         st.pyplot(fig)
+        
+        # Show ticker comparison if multiple tickers were fetched
+        if hasattr(st.session_state, 'all_ticker_data') and len(st.session_state.all_ticker_data) > 1:
+            st.subheader("📊 Ticker Performance Comparison")
+            comparison_fig = plot_ticker_comparison(
+                st.session_state.all_ticker_data, 
+                st.session_state.current_ticker if hasattr(st.session_state, 'current_ticker') else None
+            )
+            if comparison_fig:
+                st.pyplot(comparison_fig)
         
         # Train model button
         if st.button("🚀 Train Transformer Model", type="primary"):
@@ -924,3 +1002,328 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def fetch_ticker_data(ticker, start_date, end_date):
+    """Fetch historical data for a specific ticker"""
+    try:
+        st.info(f"Fetching data for {ticker}...")
+        
+        # Add some buffer days to ensure we get data
+        start_date_buffer = start_date - pd.Timedelta(days=10)
+        end_date_buffer = end_date + pd.Timedelta(days=5)
+        
+        # Fetch ticker data
+        ticker_data = yf.download(ticker, start=start_date_buffer, end=end_date_buffer, progress=False)
+        
+        if ticker_data.empty:
+            st.error(f"No data available for ticker {ticker} in the given date range")
+            return None
+        
+        # Reset index to make Date a column
+        ticker_data = ticker_data.reset_index()
+        
+        # Rename columns to match expected format
+        ticker_data = ticker_data.rename(columns={
+            'Adj Close': 'Close'  # Use adjusted close if available
+        })
+        
+        # Ensure we have the required columns
+        required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+        if all(col in ticker_data.columns for col in required_columns):
+            ticker_data = ticker_data[required_columns]
+            st.success(f"✅ Successfully fetched {len(ticker_data)} days of data for {ticker}")
+            return ticker_data
+        else:
+            st.error(f"Missing required columns for {ticker}")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error fetching data for {ticker}: {str(e)}")
+        return None
+
+def fetch_multiple_tickers(tickers, start_date, end_date):
+    """Fetch data for multiple tickers"""
+    try:
+        st.info(f"Fetching data for multiple tickers: {', '.join(tickers)}")
+        
+        # Add buffer days
+        start_date_buffer = start_date - pd.Timedelta(days=10)
+        end_date_buffer = end_date + pd.Timedelta(days=5)
+        
+        # Fetch data for all tickers at once
+        data = yf.download(tickers, start=start_date_buffer, end=end_date_buffer, progress=False, group_by='ticker')
+        
+        if data.empty:
+            st.error("No data available for the specified tickers")
+            return None
+        
+        ticker_dataframes = {}
+        
+        if len(tickers) == 1:
+            # Single ticker case
+            ticker = tickers[0]
+            ticker_data = data.reset_index()
+            ticker_data = ticker_data.rename(columns={'Adj Close': 'Close'})
+            required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+            if all(col in ticker_data.columns for col in required_columns):
+                ticker_dataframes[ticker] = ticker_data[required_columns]
+        else:
+            # Multiple tickers case
+            for ticker in tickers:
+                try:
+                    ticker_data = data[ticker].reset_index()
+                    ticker_data = ticker_data.rename(columns={'Adj Close': 'Close'})
+                    required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+                    if all(col in ticker_data.columns for col in required_columns):
+                        ticker_dataframes[ticker] = ticker_data[required_columns].dropna()
+                except:
+                    st.warning(f"Could not process data for {ticker}")
+        
+        st.success(f"✅ Successfully fetched data for {len(ticker_dataframes)} tickers")
+        return ticker_dataframes
+        
+    except Exception as e:
+        st.error(f"Error fetching multiple ticker data: {str(e)}")
+        return None
+
+def get_popular_tickers():
+    """Return a list of popular stock tickers and indices"""
+    return {
+        "Popular Stocks": [
+            "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
+            "JPM", "JNJ", "V", "PG", "UNH", "HD", "MA", "DIS", "PYPL", "ADBE",
+            "CRM", "INTC", "CSCO", "PFE", "VZ", "KO", "PEP", "T", "XOM", "CVX"
+        ],
+        "Market Indices": [
+            "^GSPC",  # S&P 500
+            "^IXIC",  # NASDAQ
+            "^DJI",   # Dow Jones
+            "^RUT",   # Russell 2000
+            "^VIX",   # VIX
+            "^TNX",   # 10-Year Treasury
+            "^FTSE",  # FTSE 100
+            "^N225",  # Nikkei 225
+        ],
+        "ETFs": [
+            "SPY", "QQQ", "IWM", "VTI", "VOO", "VEA", "VWO", "AGG", 
+            "BND", "GLD", "SLV", "TLT", "XLF", "XLK", "XLE", "XLV"
+        ],
+        "Crypto": [
+            "BTC-USD", "ETH-USD", "ADA-USD", "SOL-USD", "DOGE-USD"
+        ]
+    }
+
+def create_ticker_selection_interface():
+    """Create the ticker selection interface"""
+    st.subheader("📈 Fetch Real Market Data")
+    
+    # Add ticker search widget
+    create_ticker_search_widget()
+    
+    # Get popular tickers
+    popular_tickers = get_popular_tickers()
+    
+    # Selection method
+    selection_method = st.radio(
+        "How would you like to select data?",
+        ["Choose from Popular Lists", "Enter Custom Ticker(s)", "Upload Ticker List"],
+        key="ticker_selection_method"
+    )
+    
+    selected_tickers = []
+    
+    if selection_method == "Choose from Popular Lists":
+        st.write("**Select from popular categories:**")
+        
+        # Create tabs for different categories
+        tabs = st.tabs(list(popular_tickers.keys()))
+        
+        for i, (category, tickers) in enumerate(popular_tickers.items()):
+            with tabs[i]:
+                selected_from_category = st.multiselect(
+                    f"Select {category}:",
+                    tickers,
+                    key=f"select_{category}"
+                )
+                selected_tickers.extend(selected_from_category)
+    
+    elif selection_method == "Enter Custom Ticker(s)":
+        ticker_input = st.text_input(
+            "Enter ticker symbols (comma-separated):",
+            placeholder="e.g., AAPL, MSFT, GOOGL",
+            help="Enter one or more ticker symbols separated by commas"
+        )
+        if ticker_input:
+            selected_tickers = [ticker.strip().upper() for ticker in ticker_input.split(",") if ticker.strip()]
+    
+    elif selection_method == "Upload Ticker List":
+        uploaded_tickers = st.file_uploader(
+            "Upload a text file with ticker symbols (one per line)",
+            type=['txt'],
+            key="ticker_file"
+        )
+        if uploaded_tickers:
+            ticker_content = uploaded_tickers.read().decode('utf-8')
+            selected_tickers = [ticker.strip().upper() for ticker in ticker_content.split('\n') if ticker.strip()]
+            st.write(f"Loaded {len(selected_tickers)} tickers from file")
+    
+    return selected_tickers
+
+def display_ticker_data_interface():
+    """Display the complete ticker data fetching interface"""
+    st.markdown("---")
+    
+    # Ticker selection
+    selected_tickers = create_ticker_selection_interface()
+    
+    if selected_tickers:
+        st.write(f"**Selected tickers:** {', '.join(selected_tickers)}")
+        
+        # Date range selection
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input(
+                "Start Date",
+                value=pd.Timestamp.now() - pd.Timedelta(days=365),
+                key="ticker_start_date"
+            )
+        with col2:
+            end_date = st.date_input(
+                "End Date",
+                value=pd.Timestamp.now(),
+                key="ticker_end_date"
+            )
+        
+        # Fetch data button
+        if st.button("📊 Fetch Market Data", type="primary", use_container_width=True):
+            if len(selected_tickers) == 1:
+                # Single ticker
+                ticker_data = fetch_ticker_data(selected_tickers[0], pd.Timestamp(start_date), pd.Timestamp(end_date))
+                if ticker_data is not None:
+                    st.session_state.df = ticker_data
+                    st.session_state.current_ticker = selected_tickers[0]
+                    st.success(f"✅ Data for {selected_tickers[0]} loaded successfully!")
+                    
+                    # Display basic info
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Ticker", selected_tickers[0])
+                    with col2:
+                        st.metric("Days of Data", len(ticker_data))
+                    with col3:
+                        st.metric("Current Price", f"${ticker_data['Close'].iloc[-1]:.2f}")
+                    
+                    # Show preview
+                    st.write("**Data Preview:**")
+                    st.dataframe(ticker_data.head())
+            
+            else:
+                # Multiple tickers
+                ticker_dataframes = fetch_multiple_tickers(selected_tickers, pd.Timestamp(start_date), pd.Timestamp(end_date))
+                if ticker_dataframes:
+                    # Let user choose which ticker to use for training
+                    st.success(f"✅ Fetched data for {len(ticker_dataframes)} tickers")
+                    
+                    available_tickers = list(ticker_dataframes.keys())
+                    selected_for_training = st.selectbox(
+                        "Select ticker for model training:",
+                        available_tickers,
+                        key="training_ticker"
+                    )
+                    
+                    if selected_for_training:
+                        st.session_state.df = ticker_dataframes[selected_for_training]
+                        st.session_state.current_ticker = selected_for_training
+                        st.session_state.all_ticker_data = ticker_dataframes
+                        
+                        # Display comparison metrics
+                        st.write("**Ticker Comparison:**")
+                        comparison_data = []
+                        for ticker, data in ticker_dataframes.items():
+                            comparison_data.append({
+                                'Ticker': ticker,
+                                'Days': len(data),
+                                'Current Price': f"${data['Close'].iloc[-1]:.2f}",
+                                'Price Change (%)': f"{((data['Close'].iloc[-1] / data['Close'].iloc[0]) - 1) * 100:.2f}%",
+                                'Avg Volume': f"{data['Volume'].mean():,.0f}"
+                            })
+                        
+                        comparison_df = pd.DataFrame(comparison_data)
+                        st.dataframe(comparison_df, use_container_width=True)
+                        
+                        # Show preview of selected ticker
+                        st.write(f"**Data Preview for {selected_for_training}:**")
+                        st.dataframe(ticker_dataframes[selected_for_training].head())
+                        
+                        # Plot comparison chart
+                        st.subheader("📊 Ticker Performance Comparison")
+                        fig = plot_ticker_comparison(ticker_dataframes, selected_for_training)
+                        st.pyplot(fig)
+    
+    return len(selected_tickers) > 0 if selected_tickers else False
+
+def plot_ticker_comparison(ticker_dataframes, selected_ticker=None):
+    """Plot comparison of multiple tickers"""
+    if len(ticker_dataframes) <= 1:
+        return None
+    
+    fig, ax = plt.subplots(figsize=(14, 8))
+    
+    # Normalize prices to starting value for comparison
+    for ticker, data in ticker_dataframes.items():
+        normalized_prices = (data['Close'] / data['Close'].iloc[0]) * 100
+        line_style = '-' if ticker == selected_ticker else '--'
+        line_width = 2.5 if ticker == selected_ticker else 1.5
+        alpha = 1.0 if ticker == selected_ticker else 0.7
+        
+        ax.plot(range(len(normalized_prices)), normalized_prices, 
+               label=ticker, linestyle=line_style, linewidth=line_width, alpha=alpha)
+    
+    ax.set_title("Ticker Performance Comparison (Normalized to 100)", fontsize=16, fontweight='bold')
+    ax.set_xlabel('Days', fontsize=12)
+    ax.set_ylabel('Normalized Price (Starting Price = 100)', fontsize=12)
+    ax.legend(fontsize=10, bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax.grid(True, alpha=0.3)
+    
+    # Highlight selected ticker
+    if selected_ticker:
+        ax.text(0.02, 0.98, f"Training on: {selected_ticker}", 
+               transform=ax.transAxes, fontsize=12, fontweight='bold',
+               bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7),
+               verticalalignment='top')
+    
+    plt.tight_layout()
+    return fig
+
+def search_ticker_info(ticker):
+    """Get basic info about a ticker"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        return {
+            'Name': info.get('longName', 'N/A'),
+            'Sector': info.get('sector', 'N/A'),
+            'Industry': info.get('industry', 'N/A'),
+            'Market Cap': info.get('marketCap', 'N/A'),
+            'Currency': info.get('currency', 'N/A')
+        }
+    except:
+        return None
+
+def create_ticker_search_widget():
+    """Create a ticker search widget"""
+    with st.expander("🔍 Ticker Search & Info"):
+        search_ticker = st.text_input("Search for ticker information:", placeholder="e.g., AAPL")
+        
+        if search_ticker and st.button("Search"):
+            ticker_info = search_ticker_info(search_ticker.upper())
+            if ticker_info:
+                st.success(f"Found information for {search_ticker.upper()}:")
+                for key, value in ticker_info.items():
+                    if value != 'N/A':
+                        if key == 'Market Cap' and isinstance(value, (int, float)):
+                            value = f"${value:,.0f}"
+                        st.write(f"**{key}:** {value}")
+            else:
+                st.error(f"Could not find information for {search_ticker.upper()}")
