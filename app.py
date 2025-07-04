@@ -11,6 +11,7 @@ import io
 import base64
 from datetime import datetime, timedelta
 import warnings
+import yfinance as yf
 warnings.filterwarnings('ignore')
 
 # Set random seeds for reproducibility
@@ -120,6 +121,138 @@ def generate_synthetic_stock_data(num_days=1000, start_price=100):
     
     return pd.DataFrame(data)
 
+def fetch_market_indices(start_date, end_date):
+    """Fetch SPX and NASDAQ indices data"""
+    try:
+        # Fetch S&P 500 (^GSPC) and NASDAQ (^IXIC)
+        spx = yf.download('^GSPC', start=start_date, end=end_date, progress=False)
+        nasdaq = yf.download('^IXIC', start=start_date, end=end_date, progress=False)
+        
+        # Reset index to make Date a column
+        spx = spx.reset_index()
+        nasdaq = nasdaq.reset_index()
+        
+        # Select only Close prices and rename columns
+        spx_data = spx[['Date', 'Close']].rename(columns={'Close': 'SPX_Close'})
+        nasdaq_data = nasdaq[['Date', 'Close']].rename(columns={'Close': 'NASDAQ_Close'})
+        
+        return spx_data, nasdaq_data
+    except Exception as e:
+        st.warning(f"Could not fetch market indices: {str(e)}")
+        return None, None
+
+def create_volume_features(df):
+    """Create enhanced volume-based features"""
+    volume_features = df.copy()
+    
+    # Volume moving averages
+    volume_features['Volume_MA_5'] = df['Volume'].rolling(window=5).mean()
+    volume_features['Volume_MA_20'] = df['Volume'].rolling(window=20).mean()
+    
+    # Volume ratio (current vs average)
+    volume_features['Volume_Ratio'] = df['Volume'] / volume_features['Volume_MA_20']
+    
+    # Price-volume features
+    volume_features['Price_Volume'] = df['Close'] * df['Volume']
+    volume_features['Volume_Price_Trend'] = (df['Close'].pct_change() * df['Volume']).rolling(window=5).mean()
+    
+    # Volume momentum
+    volume_features['Volume_Change'] = df['Volume'].pct_change()
+    volume_features['Volume_Momentum'] = df['Volume'].rolling(window=5).apply(lambda x: x[-1] / x[0] - 1)
+    
+    return volume_features
+
+def add_market_context_features(df, include_indices=True, enhance_volume=True):
+    """Add market context features including indices and enhanced volume features"""
+    enhanced_df = df.copy()
+    
+    if 'Date' in enhanced_df.columns:
+        enhanced_df['Date'] = pd.to_datetime(enhanced_df['Date'])
+        start_date = enhanced_df['Date'].min()
+        end_date = enhanced_df['Date'].max()
+        
+        if include_indices:
+            # Fetch market indices
+            spx_data, nasdaq_data = fetch_market_indices(start_date, end_date)
+            
+            if spx_data is not None and nasdaq_data is not None:
+                # Merge with main dataframe
+                enhanced_df = enhanced_df.merge(spx_data, on='Date', how='left')
+                enhanced_df = enhanced_df.merge(nasdaq_data, on='Date', how='left')
+                
+                # Forward fill missing values
+                enhanced_df['SPX_Close'] = enhanced_df['SPX_Close'].fillna(method='ffill')
+                enhanced_df['NASDAQ_Close'] = enhanced_df['NASDAQ_Close'].fillna(method='ffill')
+                
+                # Create relative performance features
+                enhanced_df['Stock_vs_SPX'] = enhanced_df['Close'] / enhanced_df['SPX_Close']
+                enhanced_df['Stock_vs_NASDAQ'] = enhanced_df['Close'] / enhanced_df['NASDAQ_Close']
+                
+                # Market momentum features
+                enhanced_df['SPX_Returns'] = enhanced_df['SPX_Close'].pct_change()
+                enhanced_df['NASDAQ_Returns'] = enhanced_df['NASDAQ_Close'].pct_change()
+                enhanced_df['Stock_Returns'] = enhanced_df['Close'].pct_change()
+                
+                # Correlation features (rolling correlation with market)
+                enhanced_df['SPX_Correlation'] = enhanced_df['Stock_Returns'].rolling(window=20).corr(enhanced_df['SPX_Returns'])
+                enhanced_df['NASDAQ_Correlation'] = enhanced_df['Stock_Returns'].rolling(window=20).corr(enhanced_df['NASDAQ_Returns'])
+    
+    if enhance_volume:
+        # Add enhanced volume features
+        volume_enhanced = create_volume_features(enhanced_df)
+        enhanced_df = volume_enhanced
+    
+    # Drop rows with NaN values (due to rolling calculations)
+    enhanced_df = enhanced_df.dropna()
+    
+    return enhanced_df
+
+def load_and_preprocess_data_enhanced(df, include_indices=True, enhance_volume=True):
+    """Enhanced data preprocessing with market context and volume features"""
+    
+    # Add market context and volume features
+    enhanced_df = add_market_context_features(df, include_indices, enhance_volume)
+    
+    # Ensure Date column is datetime and sort
+    if 'Date' in enhanced_df.columns:
+        enhanced_df['Date'] = pd.to_datetime(enhanced_df['Date'])
+        enhanced_df = enhanced_df.sort_values('Date').reset_index(drop=True)
+    
+    # Define feature columns based on what's available
+    base_features = ['Open', 'High', 'Low', 'Close', 'Volume']
+    
+    volume_features = []
+    if enhance_volume:
+        volume_features = ['Volume_MA_5', 'Volume_MA_20', 'Volume_Ratio', 'Price_Volume', 
+                          'Volume_Price_Trend', 'Volume_Change', 'Volume_Momentum']
+    
+    market_features = []
+    if include_indices and 'SPX_Close' in enhanced_df.columns:
+        market_features = ['SPX_Close', 'NASDAQ_Close', 'Stock_vs_SPX', 'Stock_vs_NASDAQ',
+                          'SPX_Returns', 'NASDAQ_Returns', 'Stock_Returns', 
+                          'SPX_Correlation', 'NASDAQ_Correlation']
+    
+    # Combine all features
+    feature_columns = base_features + volume_features + market_features
+    
+    # Filter to only include columns that exist in the dataframe
+    available_features = [col for col in feature_columns if col in enhanced_df.columns]
+    
+    data = enhanced_df[available_features].values
+    
+    # Initialize scalers
+    scaler_features = MinMaxScaler()
+    scaler_target = MinMaxScaler()
+    
+    # Scale all features
+    scaled_data = scaler_features.fit_transform(data)
+    
+    # Scale target (Close price) separately for inverse transformation
+    target_data = enhanced_df[['Close']].values
+    scaled_target = scaler_target.fit_transform(target_data)
+    
+    return scaled_data, scaler_features, scaler_target, enhanced_df, available_features
+
 def load_and_preprocess_data(df):
     """Load and preprocess stock data"""
     
@@ -193,6 +326,82 @@ def calculate_metrics(y_true, y_pred):
     
     return rmse, mae, mape
 
+def predict_future_prices(model, last_sequence, scaler_target, num_days=30):
+    """Predict future stock prices for a given number of days"""
+    
+    predictions = []
+    current_sequence = last_sequence.copy()
+    
+    for _ in range(num_days):
+        # Predict next day
+        next_pred_scaled = model.predict(current_sequence.reshape(1, *current_sequence.shape), verbose=0)
+        next_pred = scaler_target.inverse_transform(next_pred_scaled.reshape(-1, 1))[0, 0]
+        predictions.append(next_pred)
+        
+        # Update sequence for next prediction
+        # Take the last sequence, remove first element, add prediction as new last element
+        # We need to scale the prediction back and create a full feature vector
+        next_pred_scaled_val = next_pred_scaled[0, 0]
+        
+        # Create a new row with the predicted close price
+        # For simplicity, we'll replicate the close price across OHLC and keep volume constant
+        new_row = current_sequence[-1].copy()
+        new_row[0] = next_pred_scaled_val  # Open
+        new_row[1] = next_pred_scaled_val * 1.01  # High (slightly higher)
+        new_row[2] = next_pred_scaled_val * 0.99  # Low (slightly lower)
+        new_row[3] = next_pred_scaled_val  # Close
+        # Volume stays the same as the last day
+        
+        # Shift sequence and add new prediction
+        current_sequence = np.roll(current_sequence, -1, axis=0)
+        current_sequence[-1] = new_row
+    
+    return np.array(predictions)
+
+def plot_future_predictions(historical_prices, future_predictions, num_historical_days=100, title="Stock Price Forecast"):
+    """Plot historical prices with future predictions"""
+    
+    # Take last num_historical_days for context
+    historical_subset = historical_prices[-num_historical_days:] if len(historical_prices) > num_historical_days else historical_prices
+    
+    # Create time indices
+    historical_indices = range(len(historical_subset))
+    future_indices = range(len(historical_subset), len(historical_subset) + len(future_predictions))
+    
+    fig, ax = plt.subplots(figsize=(14, 8))
+    
+    # Plot historical prices
+    ax.plot(historical_indices, historical_subset, label='Historical Prices', color='blue', linewidth=2)
+    
+    # Plot future predictions
+    ax.plot(future_indices, future_predictions, label='Future Predictions', color='red', linewidth=2, linestyle='--')
+    
+    # Add a connecting line between last historical and first prediction
+    ax.plot([historical_indices[-1], future_indices[0]], 
+            [historical_subset[-1], future_predictions[0]], 
+            color='orange', linewidth=2, alpha=0.7)
+    
+    # Add vertical line to separate historical and future
+    ax.axvline(x=len(historical_subset)-1, color='gray', linestyle=':', alpha=0.7, label='Today')
+    
+    # Add confidence band (simple approach - you could make this more sophisticated)
+    future_std = np.std(historical_subset[-30:]) if len(historical_subset) >= 30 else np.std(historical_subset)
+    upper_bound = future_predictions + future_std
+    lower_bound = future_predictions - future_std
+    
+    ax.fill_between(future_indices, lower_bound, upper_bound, alpha=0.2, color='red', label='Confidence Band')
+    
+    ax.set_title(title, fontsize=16, fontweight='bold')
+    ax.set_xlabel('Days', fontsize=12)
+    ax.set_ylabel('Stock Price ($)', fontsize=12)
+    ax.legend(fontsize=10)
+    ax.grid(True, alpha=0.3)
+    
+    # Format y-axis to show dollar signs
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:.2f}'))
+    
+    return fig
+
 # Streamlit App
 def main():
     st.title("🔮 Stock Price Prediction with Transformer Model")
@@ -215,6 +424,34 @@ def main():
     ff_dim = st.sidebar.selectbox("Feed Forward Dimension", [64, 128, 256], index=1)
     epochs = st.sidebar.slider("Training Epochs", 10, 100, 50)
     batch_size = st.sidebar.selectbox("Batch Size", [16, 32, 64], index=1)
+    
+    # Enhanced features
+    st.sidebar.subheader("Enhanced Features")
+    include_market_indices = st.sidebar.checkbox("Include SPX & NASDAQ", value=False, 
+                                                help="Add S&P 500 and NASDAQ indices for market context")
+    enhance_volume_features = st.sidebar.checkbox("Enhanced Volume Features", value=True,
+                                                 help="Add volume moving averages, ratios, and momentum")
+    
+    # Model type selection
+    model_type = st.sidebar.radio("Model Configuration:", 
+                                ["Basic Model (OHLCV only)", 
+                                 "Enhanced Model (with selected features)"],
+                                help="Choose between basic model or enhanced model with additional features")
+    
+    # Information about enhanced features
+    if model_type == "Enhanced Model (with selected features)":
+        with st.sidebar.expander("ℹ️ Enhanced Features Info"):
+            if include_market_indices:
+                st.write("**Market Indices Features:**")
+                st.write("• SPX & NASDAQ close prices")
+                st.write("• Relative performance vs indices")
+                st.write("• Market returns & correlations")
+            
+            if enhance_volume_features:
+                st.write("**Volume Features:**")
+                st.write("• Volume moving averages (5, 20 days)")
+                st.write("• Volume ratios & momentum")
+                st.write("• Price-volume relationships")
     
     # Load data
     # Use session state to store the dataframe across reruns
@@ -310,8 +547,31 @@ def main():
         if st.button("🚀 Train Transformer Model", type="primary"):
             
             with st.spinner("Preprocessing data..."):
-                # Preprocess data
-                scaled_data, scaler_features, scaler_target, original_df = load_and_preprocess_data(df)
+                # Choose preprocessing method based on model type
+                if model_type == "Enhanced Model (with selected features)":
+                    # Enhanced preprocessing with market context and volume features
+                    scaled_data, scaler_features, scaler_target, enhanced_df, feature_names = load_and_preprocess_data_enhanced(
+                        df, 
+                        include_indices=include_market_indices, 
+                        enhance_volume=enhance_volume_features
+                    )
+                    
+                    st.info(f"Using enhanced features: {', '.join(feature_names)}")
+                    
+                    # Display enhanced feature info
+                    if include_market_indices and 'SPX_Close' in enhanced_df.columns:
+                        st.success("✅ Market indices (SPX, NASDAQ) successfully integrated!")
+                    elif include_market_indices:
+                        st.warning("⚠️ Market indices requested but not available (using synthetic data or no date column)")
+                    
+                    if enhance_volume_features:
+                        st.success("✅ Enhanced volume features integrated!")
+                    
+                else:
+                    # Basic preprocessing
+                    scaled_data, scaler_features, scaler_target, enhanced_df = load_and_preprocess_data(df)
+                    feature_names = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    st.info("Using basic OHLCV features")
                 
                 # Create sequences
                 X, y = create_sequences(scaled_data, sequence_length)
@@ -320,6 +580,7 @@ def main():
                 X_train, X_test, y_train, y_test = train_test_split_temporal(X, y)
                 
                 st.success(f"Data preprocessed! Training sequences: {len(X_train)}, Test sequences: {len(X_test)}")
+                st.info(f"Input shape: {X.shape}, Features: {len(feature_names)}")
             
             with st.spinner("Building Transformer model..."):
                 # Build model
@@ -459,7 +720,7 @@ def main():
             next_day_scaled = model.predict(last_sequence, verbose=0)
             next_day_price = scaler_target.inverse_transform(next_day_scaled.reshape(-1, 1))[0, 0]
             
-            current_price = df['Close'].iloc[-1]
+            current_price = enhanced_df['Close'].iloc[-1]
             price_change = next_day_price - current_price
             price_change_pct = (price_change / current_price) * 100
             
@@ -472,8 +733,104 @@ def main():
             with col3:
                 st.metric("Predicted Change", f"{price_change_pct:.2f}%")
             
+            # Future Price Predictions
+            st.subheader("📈 Future Price Predictions")
+            
+            # Controls for future predictions
+            col1, col2 = st.columns(2)
+            with col1:
+                future_days = st.slider("Days to Predict", 7, 90, 30, key="future_days")
+            with col2:
+                historical_context_days = st.slider("Historical Context Days", 30, 200, 100, key="context_days")
+            
+            if st.button("🔮 Generate Future Predictions", type="secondary"):
+                with st.spinner(f"Predicting stock prices for the next {future_days} days..."):
+                    # Get the last sequence for prediction
+                    last_sequence_scaled = X_test[-1]  # This is already scaled
+                    
+                    # Predict future prices
+                    future_predictions = predict_future_prices(
+                        model, 
+                        last_sequence_scaled, 
+                        scaler_target, 
+                        num_days=future_days
+                    )
+                    
+                    # Get historical prices for context
+                    historical_prices = enhanced_df['Close'].values
+                    
+                    # Plot future predictions
+                    future_fig = plot_future_predictions(
+                        historical_prices, 
+                        future_predictions, 
+                        num_historical_days=historical_context_days,
+                        title=f"Stock Price Forecast - Next {future_days} Days"
+                    )
+                    
+                    st.pyplot(future_fig)
+                    
+                    # Display future prediction statistics
+                    st.subheader("📊 Future Prediction Analysis")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Predicted Min", f"${future_predictions.min():.2f}")
+                    with col2:
+                        st.metric("Predicted Max", f"${future_predictions.max():.2f}")
+                    with col3:
+                        st.metric("Predicted Mean", f"${future_predictions.mean():.2f}")
+                    with col4:
+                        volatility = np.std(future_predictions)
+                        st.metric("Predicted Volatility", f"${volatility:.2f}")
+                    
+                    # Show trend analysis
+                    trend_change = future_predictions[-1] - future_predictions[0]
+                    trend_pct = (trend_change / future_predictions[0]) * 100
+                    
+                    if trend_change > 0:
+                        st.success(f"📈 Predicted upward trend: +${trend_change:.2f} ({trend_pct:.1f}%) over {future_days} days")
+                    else:
+                        st.error(f"📉 Predicted downward trend: ${trend_change:.2f} ({trend_pct:.1f}%) over {future_days} days")
+                    
+                    # Show detailed predictions table
+                    with st.expander("View Detailed Predictions"):
+                        # Create future dates
+                        last_date = pd.to_datetime(enhanced_df['Date'].iloc[-1]) if 'Date' in enhanced_df.columns else pd.Timestamp.now()
+                        future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=future_days, freq='D')
+                        
+                        predictions_df = pd.DataFrame({
+                            'Date': future_dates,
+                            'Predicted_Price': future_predictions,
+                            'Day_Change': np.concatenate([[0], np.diff(future_predictions)]),
+                            'Day_Change_Pct': np.concatenate([[0], np.diff(future_predictions) / future_predictions[:-1] * 100])
+                        })
+                        
+                        # Format the dataframe for display
+                        predictions_df['Predicted_Price'] = predictions_df['Predicted_Price'].apply(lambda x: f"${x:.2f}")
+                        predictions_df['Day_Change'] = predictions_df['Day_Change'].apply(lambda x: f"${x:.2f}")
+                        predictions_df['Day_Change_Pct'] = predictions_df['Day_Change_Pct'].apply(lambda x: f"{x:.2f}%")
+                        
+                        st.dataframe(predictions_df, use_container_width=True)
+            
             # Model insights
             st.subheader("💡 Model Insights")
+            
+            # Feature analysis
+            if model_type == "Enhanced Model (with selected features)":
+                feature_info = f"**Enhanced Model with {len(feature_names)} features:**\n"
+                feature_info += f"- Base features: {', '.join(['Open', 'High', 'Low', 'Close', 'Volume'])}\n"
+                
+                if enhance_volume_features:
+                    volume_feats = [f for f in feature_names if 'Volume' in f and f != 'Volume']
+                    if volume_feats:
+                        feature_info += f"- Volume features: {', '.join(volume_feats)}\n"
+                
+                if include_market_indices and any('SPX' in f or 'NASDAQ' in f for f in feature_names):
+                    market_feats = [f for f in feature_names if 'SPX' in f or 'NASDAQ' in f]
+                    feature_info += f"- Market features: {', '.join(market_feats)}\n"
+                
+                st.info(feature_info)
             
             st.info(f"""
             **Model Performance Summary:**
@@ -487,6 +844,7 @@ def main():
             - {num_heads} attention heads
             - {ff_dim} feed-forward dimension
             - Trained for {len(history.history['loss'])} epochs
+            - Input features: {len(feature_names)}
             """)
             
             if mape < 5:
