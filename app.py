@@ -223,6 +223,13 @@ def main():
     # Use session state to store the dataframe across reruns
     if 'df' not in st.session_state:
         st.session_state.df = None
+    if 'data_source' not in st.session_state:
+        st.session_state.data_source = data_source
+    
+    # Reset dataframe if data source changed
+    if st.session_state.data_source != data_source:
+        st.session_state.df = None
+        st.session_state.data_source = data_source
     
     if data_source == "Upload CSV File":
         st.subheader("📁 Upload Stock Data")
@@ -243,12 +250,13 @@ def main():
                 if missing_columns:
                     st.error(f"Missing required columns: {missing_columns}")
                     st.session_state.df = None
+                else:
+                    st.sidebar.success("✅ CSV file validated successfully!")
                     return
                 
             except Exception as e:
                 st.error(f"Error loading file: {str(e)}")
                 st.session_state.df = None
-                return
     
     else:
         st.subheader("🎲 Generate Synthetic Data")
@@ -264,9 +272,16 @@ def main():
                 st.session_state.df = generate_synthetic_stock_data(num_days, start_price)
                 st.success(f"Synthetic data generated! Shape: {st.session_state.df.shape}")
     
+    # Check if data is available for training
+    if st.session_state.df is None:
+        st.info("ℹ️ Please load data first before training the model.")
+    
     if st.session_state.df is not None:
         # Assign the DataFrame from session state to a local variable for convenience
         df = st.session_state.df
+        
+        # Debug info
+        st.sidebar.success(f"✅ Data loaded: {df.shape[0]} rows")
 
         # Display data preview
         st.subheader("📊 Data Preview")
