@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras import layers
+from tensorflow.keras import layers, backend as K
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import matplotlib.pyplot as plt
@@ -87,6 +87,182 @@ def build_transformer_model(input_shape, head_size, num_heads, ff_dim,
     outputs = layers.Dense(1)(x)
     
     return keras.Model(inputs, outputs)
+
+### --- Galformer Model Code --- ###
+# The following classes implement the Galformer architecture, adapted for this application.
+# Original source: https://github.com/AnswerXuan/Galformer-Improved-Transformer-for-Time-Series-Prediction
+
+class SeasonalLayer(layers.Layer):
+    def __init__(self, d_model, n_seasons=4, **kwargs):
+        super(SeasonalLayer, self).__init__(**kwargs)
+        self.d_model = d_model
+        self.n_seasons = n_seasons
+        self.season_convs = [layers.Conv1D(filters=d_model, kernel_size=k, padding='causal')
+                             for k in range(1, n_seasons + 1)]
+
+    def call(self, inputs):
+        seasonal_outputs = []
+        for conv in self.season_convs:
+            seasonal_outputs.append(conv(inputs))
+        
+        # Stack and average the seasonal features
+        stacked_seasons = tf.stack(seasonal_outputs, axis=-1)
+        season_output = tf.reduce_mean(stacked_seasons, axis=-1)
+        
+        return season_output
+
+class AutoCorrelation(layers.Layer):
+    def __init__(self, factor=1, **kwargs):
+        super(AutoCorrelation, self).__init__(**kwargs)
+        self.factor = factor
+
+    def call(self, queries, keys, values):
+        B, L, _ = tf.unstack(tf.shape(queries))
+        _, S, _ = tf.unstack(tf.shape(keys))
+        
+        # Compute autocorrelation using FFT
+        q_fft = tf.signal.rfft(queries, fft_length=[L])
+        k_fft = tf.signal.rfft(keys, fft_length=[S])
+        
+        # Conjugate and multiply
+        R = q_fft * tf.math.conj(k_fft)
+        corr = tf.signal.irfft(R, fft_length=[L + S -1])
+
+        # Find top-k delays
+        top_k = int(self.factor * tf.math.log(tf.cast(L, dtype=tf.float32)))
+        mean_value = tf.reduce_mean(corr, axis=1)
+        
+        # Ensure top_k is not larger than the correlation length
+        top_k = min(top_k, tf.shape(mean_value)[-1])
+
+        top_k_val, top_k_ind = tf.math.top_k(mean_value, k=top_k)
+        
+        # Gather values based on top delays
+        tmp_corr = tf.nn.softmax(top_k_val, axis=-1)
+        
+        # Roll values and sum
+        V_rolled = []
+        for i in range(top_k):
+            index = top_k_ind[:, i]
+            # Ensure index is a scalar for tf.roll
+            rolled = tf.roll(values, shift=-index[0], axis=1)
+            V_rolled.append(rolled)
+        
+        V_stacked = tf.stack(V_rolled, axis=-2)
+        
+        # Weighted sum of rolled values
+        output = tf.einsum('bld,bl->bd', V_stacked, tmp_corr)
+        return output, None # Return None for compatibility with MHA layer
+
+class AutoCorrelationLayer(layers.Layer):
+    def __init__(self, correlation, d_model, n_heads, d_keys=None, d_values=None, **kwargs):
+        super(AutoCorrelationLayer, self).__init__(**kwargs)
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.correlation = correlation
+        self.query_projection = layers.Dense(d_model)
+        self.key_projection = layers.Dense(d_model)
+        self.value_projection = layers.Dense(d_model)
+        self.out_projection = layers.Dense(d_model)
+
+    def call(self, queries, keys, values):
+        B, L, _ = tf.unstack(tf.shape(queries))
+        _, S, _ = tf.unstack(tf.shape(keys))
+        
+        queries = self.query_projection(queries)
+        keys = self.key_projection(keys)
+        values = self.value_projection(values)
+
+        # Reshape for multi-head
+        queries = tf.reshape(queries, (B, L, self.n_heads, -1))
+        keys = tf.reshape(keys, (B, S, self.n_heads, -1))
+        values = tf.reshape(values, (B, S, self.n_heads, -1))
+
+        out, _ = self.correlation(queries, keys, values)
+        out = tf.reshape(out, (B, L, -1))
+        
+        return self.out_projection(out)
+
+class DataEmbedding(layers.Layer):
+    def __init__(self, c_in, d_model, dropout=0.1, **kwargs):
+        super(DataEmbedding, self).__init__(**kwargs)
+        self.value_embedding = layers.Conv1D(filters=d_model, kernel_size=3, padding='causal')
+        self.position_embedding = PositionalEmbedding(sequence_length=5000) # Use a large capacity
+        self.dropout = layers.Dropout(dropout)
+
+    def call(self, x):
+        x = self.value_embedding(x)
+        x = self.position_embedding(x)
+        return self.dropout(x)
+
+class EncoderLayer(layers.Layer):
+    def __init__(self, d_model, n_heads, d_ff=None, dropout=0.1, activation="relu", factor=1, **kwargs):
+        super(EncoderLayer, self).__init__(**kwargs)
+        d_ff = d_ff or 4 * d_model
+        self.attention = AutoCorrelationLayer(AutoCorrelation(factor), d_model, n_heads)
+        self.conv1 = layers.Conv1D(filters=d_ff, kernel_size=1)
+        self.conv2 = layers.Conv1D(filters=d_model, kernel_size=1)
+        self.norm1 = layers.LayerNormalization(epsilon=1e-6)
+        self.norm2 = layers.LayerNormalization(epsilon=1e-6)
+        self.dropout = layers.Dropout(dropout)
+        self.activation = layers.Activation(activation)
+
+    def call(self, x):
+        new_x = self.attention(x, x, x)
+        x = x + self.dropout(new_x)
+        y = x = self.norm1(x)
+        y = self.dropout(self.activation(self.conv1(y)))
+        y = self.dropout(self.conv2(y))
+        return self.norm2(x + y)
+
+class Encoder(layers.Layer):
+    def __init__(self, attn_layers, norm_layer=None, **kwargs):
+        super(Encoder, self).__init__(**kwargs)
+        self.attn_layers = attn_layers
+        self.norm = norm_layer
+
+    def call(self, x):
+        for attn_layer in self.attn_layers:
+            x = attn_layer(x)
+        if self.norm is not None:
+            x = self.norm(x)
+        return x
+
+class DecoderLayer(layers.Layer):
+    def __init__(self, d_model, n_heads, d_ff=None, dropout=0.1, activation="relu", factor=1, **kwargs):
+        super(DecoderLayer, self).__init__(**kwargs)
+        d_ff = d_ff or 4 * d_model
+        self.self_attention = AutoCorrelationLayer(AutoCorrelation(factor), d_model, n_heads)
+        self.cross_attention = AutoCorrelationLayer(AutoCorrelation(factor), d_model, n_heads)
+        self.conv1 = layers.Conv1D(filters=d_ff, kernel_size=1)
+        self.conv2 = layers.Conv1D(filters=d_model, kernel_size=1)
+        self.norm1 = layers.LayerNormalization(epsilon=1e-6)
+        self.norm2 = layers.LayerNormalization(epsilon=1e-6)
+        self.norm3 = layers.LayerNormalization(epsilon=1e-6)
+        self.dropout = layers.Dropout(dropout)
+        self.activation = layers.Activation(activation)
+
+    def call(self, x, cross):
+        x = x + self.dropout(self.self_attention(x, x, x))
+        x = self.norm1(x)
+        x = x + self.dropout(self.cross_attention(x, cross, cross))
+        y = x = self.norm2(x)
+        y = self.dropout(self.activation(self.conv1(y)))
+        y = self.dropout(self.conv2(y))
+        return self.norm3(x + y)
+
+class Decoder(layers.Layer):
+    def __init__(self, layers, norm_layer=None, **kwargs):
+        super(Decoder, self).__init__(**kwargs)
+        self.layers = layers
+        self.norm = norm_layer
+
+    def call(self, x, cross):
+        for layer in self.layers:
+            x = layer(x, cross)
+        if self.norm is not None:
+            x = self.norm(x)
+        return x
 
 def generate_synthetic_stock_data(num_days=1000, start_price=100):
     """Generate synthetic stock data for demonstration"""
@@ -321,6 +497,33 @@ def create_sequences(data, sequence_length, target_column_index=3):
     
     return np.array(X), np.array(y)
 
+def create_sequences_for_galformer(data, sequence_length, label_len, target_column_index=3):
+    """
+    Create sequences for the Galformer (Encoder-Decoder) model.
+    This model requires three parts:
+    1. Encoder Input: The historical sequence.
+    2. Decoder Input: The known part of the target sequence (for teacher forcing).
+    3. Target (y): The value to be predicted.
+    """
+    encoder_inputs, decoder_inputs, targets = [], [], []
+
+    # We need at least `sequence_length` data points to form the first sequence.
+    # The loop will go up to the second to last element, as the last element will be the target.
+    for i in range(sequence_length, len(data)):
+        # 1. Encoder input: The full look-back window.
+        enc_in = data[i - sequence_length:i]
+        encoder_inputs.append(enc_in)
+
+        # 2. Decoder input: The last `label_len` part of the known sequence.
+        # This part acts as a "prompt" or "start token" for the decoder.
+        dec_in = data[i - label_len:i]
+        decoder_inputs.append(dec_in)
+
+        # 3. Target: The 'Close' price of the next day.
+        target = data[i, target_column_index]
+        targets.append(target)
+
+    
 def train_test_split_temporal(X, y, test_size=0.2):
     """Split data chronologically for time series"""
     
