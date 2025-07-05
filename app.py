@@ -3,16 +3,13 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras import layers, backend as K
+from tensorflow.keras import layers
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import matplotlib.pyplot as plt
-import io
-import base64
-from datetime import datetime, timedelta
-import warnings
 import yfinance as yf
-warnings.filterwarnings('ignore')
+from datetime import datetime, timedelta
+import math
 
 # Set random seeds for reproducibility
 np.random.seed(42)
@@ -1365,7 +1362,7 @@ def main():
                 if model_architecture == "Galformer (Advanced)":
                     # Galformer sequences
                     X_enc, X_dec, y = create_sequences_for_galformer(
-                        scaled_data, sequence_length, label_len, pred_len
+                        scaled_data, sequence_length, label_len, pred_len, target_column_index=feature_names.index('Close')
                     )
                     
                     # Split data
@@ -1518,25 +1515,30 @@ def main():
                             future_predictions = predict_future_prices(
                                 model, last_sequence_scaled, scaler_target, num_days=future_days
                             )
-                        else:
-                            # For Galformer, use the encoder-decoder prediction
+                        else: # Galformer Future Prediction Logic
+                            # For Galformer, use the last available sequence from the training data
                             last_enc_sequence = X_enc_test[-1:] 
-                            last_dec_sequence = X_dec_test[-1:]
                             
-                            # Predict multiple steps at once
+                            # The decoder input needs the last `label_len` part of the encoder sequence
+                            # plus zeros for the part to be predicted.
+                            dec_input_hist = last_enc_sequence[0, -label_len:, :]
+                            dec_input_pred = np.zeros((pred_len, dec_input_hist.shape[1]))
+                            last_dec_sequence = np.concatenate([dec_input_hist, dec_input_pred], axis=0)
+                            last_dec_sequence = np.expand_dims(last_dec_sequence, axis=0)
+
+                            # Predict `pred_len` steps at once
                             future_pred_scaled = model.predict([last_enc_sequence, last_dec_sequence], verbose=0)
-                            if len(future_pred_scaled.shape) > 1:
-                                future_predictions = scaler_target.inverse_transform(
-                                    future_pred_scaled[0][:future_days].reshape(-1, 1)
-                                ).flatten()
-                            else:
-                                future_predictions = scaler_target.inverse_transform(
-                                    future_pred_scaled[:future_days].reshape(-1, 1)
-                                ).flatten()
+                            
+                            # Inverse transform the predictions
+                            # We take the first `future_days` from the predicted sequence
+                            num_predictions = min(future_days, pred_len)
+                            future_predictions = scaler_target.inverse_transform(
+                                future_pred_scaled[0][:num_predictions].reshape(-1, 1)
+                            ).flatten()
                         
                         historical_prices = enhanced_df['Close'].values
                         
-                        future_fig = plot_future_predictions(
+                        future_fig, stats = plot_future_predictions(
                             historical_prices, 
                             future_predictions,
                             num_historical_days=historical_context_days,
@@ -1552,10 +1554,9 @@ def main():
                         with col2:
                             st.metric("Predicted Max", f"${future_predictions.max():.2f}")
                         with col3:
-                            st.metric("Predicted Mean", f"${future_predictions.mean():.2f}")
+                            st.metric("Predicted Mean", f"${stats['mean']:.2f}")
                         with col4:
-                            volatility = np.std(future_predictions)
-                            st.metric("Volatility", f"${volatility:.2f}")
+                            st.metric("Volatility", f"${stats['volatility']:.2f}")
     
     else:
         st.info("👆 Please select a data source and load data to begin training.")
