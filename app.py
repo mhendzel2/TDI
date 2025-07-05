@@ -1016,9 +1016,9 @@ def main():
                     feature_names = ['Open', 'High', 'Low', 'Close', 'Volume']
                     st.success("Basic preprocessing complete! Using standard OHLCV features.")
                 
-                # Create sequences based on model architecture
+                # Create sequences and train based on model architecture
                 if model_architecture == "Galformer (Advanced)":
-                    # Galformer sequences
+                    # 1. Create Galformer sequences
                     X_enc, X_dec, y = create_sequences_for_galformer(
                         scaled_data,
                         sequence_length,
@@ -1026,53 +1026,65 @@ def main():
                         pred_len,
                         target_column_index=feature_names.index('Close')
                     )
-                    # Split data for Galformer
                     X_enc_train, X_enc_test, X_dec_train, X_dec_test, y_train, y_test = \
                         train_test_split_temporal_galformer(X_enc, X_dec, y)
-                else:
-                    # Standard Transformer sequences
+                    
+                    st.success(f"Galformer data prepared! Training sequences: {len(X_enc_train)}")
+
+                    # 2. Build Galformer model
+                    input_shape = (sequence_length, X_enc.shape[-1])
+                    model = build_galformer_model(
+                        input_shape=input_shape, d_model=d_model, n_heads=num_heads,
+                        e_layers=e_layers, d_layers=d_layers, d_ff=ff_dim,
+                        factor=factor, dropout=0.1, label_len=label_len, pred_len=pred_len
+                    )
+                    model.compile(optimizer=keras.optimizers.Adam(learning_rate=0.001), loss='mse', metrics=['mae'])
+                    st.success("Galformer model built successfully!")
+
+                    # 3. Train Galformer model
+                    history = model.fit(
+                        [X_enc_train, X_dec_train], y_train,
+                        epochs=epochs, batch_size=batch_size, validation_split=0.2,
+                        callbacks=[keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)],
+                        verbose=0
+                    )
+
+                    # 4. Make predictions with Galformer
+                    y_pred = model.predict([X_enc_test, X_dec_test], verbose=0)
+                    
+                    # Handle sequence predictions
+                    y_pred_single = y_pred[:, 0] if len(y_pred.shape) > 1 and y_pred.shape[1] > 1 else y_pred.flatten()
+                    y_test_single = y_test[:, 0] if len(y_test.shape) > 1 and y_test.shape[1] > 1 else y_test.flatten()
+
+                    y_pred_original = scaler_target.inverse_transform(y_pred_single.reshape(-1, 1)).flatten()
+                    y_test_original = scaler_target.inverse_transform(y_test_single.reshape(-1, 1)).flatten()
+
+                else: # Standard Transformer
+                    # 1. Create Standard Transformer sequences
                     X, y = create_sequences(scaled_data, sequence_length)
                     X_train, X_test, y_train, y_test = train_test_split_temporal(X, y)
                     
                     st.success(f"Standard Transformer data prepared! Training sequences: {len(X_train)}")
                     
-                    # Build model
+                    # 2. Build Standard Transformer model
                     input_shape = (sequence_length, X.shape[-1])
-                    
                     model = build_transformer_model(
-                        input_shape=input_shape,
-                        head_size=64,
-                        num_heads=num_heads,
-                        ff_dim=ff_dim,
-                        num_transformer_blocks=num_transformer_blocks,
-                        mlp_units=[128, 64],
-                        dropout=0.1,
-                        mlp_dropout=0.1
+                        input_shape=input_shape, head_size=64, num_heads=num_heads,
+                        ff_dim=ff_dim, num_transformer_blocks=num_transformer_blocks,
+                        mlp_units=[128, 64], dropout=0.1, mlp_dropout=0.1
                     )
-                    
-                    model.compile(
-                        optimizer=keras.optimizers.Adam(learning_rate=0.001),
-                        loss='mse',
-                        metrics=['mae']
-                    )
-                    
+                    model.compile(optimizer=keras.optimizers.Adam(learning_rate=0.001), loss='mse', metrics=['mae'])
                     st.success("Standard Transformer model built successfully!")
                     
-                    # Train model
-                    callbacks = [
-                        keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
-                    ]
-                    
+                    # 3. Train Standard Transformer model
                     history = model.fit(
                         X_train, y_train,
-                        epochs=epochs,
-                        batch_size=batch_size,
-                        validation_split=0.2,
-                        callbacks=callbacks,
+                        epochs=epochs, batch_size=batch_size, validation_split=0.2,
+                        callbacks=[keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)],
                         verbose=0
                     )
                     
-                    # Make predictions
+                    # 4. Make predictions with Standard Transformer
                     y_pred_scaled = model.predict(X_test, verbose=0)
                     y_pred_original = scaler_target.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
                     y_test_original = scaler_target.inverse_transform(y_test.reshape(-1, 1)).flatten()
@@ -1117,7 +1129,7 @@ def main():
                             future_predictions = predict_future_prices(
                                 model, last_sequence_scaled, scaler_target, num_days=future_days
                             )
-                        else: # Galformer Future Prediction Logic
+                        else # Galformer Future Prediction Logic
                             # For Galformer, use the last available sequence from the training data
                             last_enc_sequence = X_enc_test[-1:] 
                             
