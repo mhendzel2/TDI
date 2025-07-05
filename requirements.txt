@@ -4,4 +4,10 @@ numpy
 tensorflow
 scikit-learn
 matplotlib
+streamlit
+tf-nightly
+scikit-learn
+matplotlib
 yfinance
+pandas
+numpy

@@ -220,11 +220,21 @@ def add_market_context_features(df, include_indices=True, enhance_volume=True):
     
     return enhanced_df
 
-def load_and_preprocess_data_enhanced(df, include_indices=True, enhance_volume=True):
-    """Enhanced data preprocessing with market context and volume features"""
+def load_and_preprocess_data_enhanced(df, include_indices=True, enhance_volume=True, include_industry_etf=True, ticker_symbol=None):
+    """Enhanced data preprocessing with market context, volume features, and industry ETF data"""
     
     # Add market context and volume features
     enhanced_df = add_market_context_features(df, include_indices, enhance_volume)
+    
+    # Add industry ETF features if requested and ticker is provided
+    if include_industry_etf and ticker_symbol:
+        try:
+            ticker_info = get_ticker_industry_info(ticker_symbol)
+            enhanced_df = add_industry_context_features(enhanced_df, ticker_info, include_industry_etf)
+            st.success(f"Added industry ETF features for {ticker_symbol}")
+        except Exception as e:
+            st.warning(f"Could not add industry ETF features: {str(e)}")
+            include_industry_etf = False
     
     # Ensure Date column is datetime and sort
     if 'Date' in enhanced_df.columns:
@@ -245,8 +255,14 @@ def load_and_preprocess_data_enhanced(df, include_indices=True, enhance_volume=T
                           'SPX_Returns', 'NASDAQ_Returns', 'Stock_Returns', 
                           'SPX_Correlation', 'NASDAQ_Correlation']
     
+    industry_features = []
+    if include_industry_etf and 'Industry_ETF_Close' in enhanced_df.columns:
+        industry_features = ['Industry_ETF_Close', 'Industry_ETF_Volume', 'Stock_vs_Industry_ETF',
+                           'Industry_ETF_Returns', 'Stock_Industry_Correlation', 'Stock_Industry_Beta',
+                           'Industry_ETF_Relative_Volume']
+    
     # Combine all features
-    feature_columns = base_features + volume_features + market_features
+    feature_columns = base_features + volume_features + market_features + industry_features
     
     # Filter to only include columns that exist in the dataframe
     available_features = [col for col in feature_columns if col in enhanced_df.columns]
@@ -423,6 +439,328 @@ def create_download_link(df, filename="stock_data.csv"):
     href = f'<a href="data:file/csv;base64,{b64}" download="{filename}">📥 Download CSV</a>'
     return href
 
+def fetch_ticker_data(ticker, start_date, end_date):
+    """Fetch historical data for a specific ticker"""
+    try:
+        st.info(f"Fetching data for {ticker}...")
+        
+        # Add some buffer days to ensure we get data
+        start_date_buffer = start_date - pd.Timedelta(days=10)
+        end_date_buffer = end_date + pd.Timedelta(days=5)
+        
+        # Fetch ticker data
+        ticker_data = yf.download(ticker, start=start_date_buffer, end=end_date_buffer, progress=False)
+        
+        if ticker_data.empty:
+            st.error(f"No data available for ticker {ticker} in the given date range")
+            return None
+        
+        # Reset index to make Date a column
+        ticker_data = ticker_data.reset_index()
+        
+        # Rename columns to match expected format
+        ticker_data = ticker_data.rename(columns={
+            'Adj Close': 'Close'  # Use adjusted close if available
+        })
+        
+        # Ensure we have the required columns
+        required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+        if all(col in ticker_data.columns for col in required_columns):
+            ticker_data = ticker_data[required_columns]
+            st.success(f"✅ Successfully fetched {len(ticker_data)} days of data for {ticker}")
+            return ticker_data
+        else:
+            st.error(f"Missing required columns for {ticker}")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error fetching data for {ticker}: {str(e)}")
+        return None
+
+def fetch_multiple_tickers(tickers, start_date, end_date):
+    """Fetch data for multiple tickers"""
+    try:
+        st.info(f"Fetching data for multiple tickers: {', '.join(tickers)}")
+        
+        # Add buffer days
+        start_date_buffer = start_date - pd.Timedelta(days=10)
+        end_date_buffer = end_date + pd.Timedelta(days=5)
+        
+        # Fetch data for all tickers at once
+        data = yf.download(tickers, start=start_date_buffer, end=end_date_buffer, progress=False, group_by='ticker')
+        
+        if data.empty:
+            st.error("No data available for the specified tickers")
+            return None
+        
+        ticker_dataframes = {}
+        
+        if len(tickers) == 1:
+            # Single ticker case
+            ticker = tickers[0]
+            ticker_data = data.reset_index()
+            ticker_data = ticker_data.rename(columns={'Adj Close': 'Close'})
+            required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+            if all(col in ticker_data.columns for col in required_columns):
+                ticker_dataframes[ticker] = ticker_data[required_columns]
+        else:
+            # Multiple tickers case
+            for ticker in tickers:
+                try:
+                    ticker_data = data[ticker].reset_index()
+                    ticker_data = ticker_data.rename(columns={'Adj Close': 'Close'})
+                    required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
+                    if all(col in ticker_data.columns for col in required_columns):
+                        ticker_dataframes[ticker] = ticker_data[required_columns].dropna()
+                except:
+                    st.warning(f"Could not process data for {ticker}")
+        
+        st.success(f"✅ Successfully fetched data for {len(ticker_dataframes)} tickers")
+        return ticker_dataframes
+        
+    except Exception as e:
+        st.error(f"Error fetching multiple ticker data: {str(e)}")
+        return None
+
+def get_popular_tickers():
+    """Return a list of popular stock tickers and indices"""
+    return {
+        "Popular Stocks": [
+            "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
+            "JPM", "JNJ", "V", "PG", "UNH", "HD", "MA", "DIS", "PYPL", "ADBE",
+            "CRM", "INTC", "CSCO", "PFE", "VZ", "KO", "PEP", "T", "XOM", "CVX"
+        ],
+        "Market Indices": [
+            "^GSPC",  # S&P 500
+            "^IXIC",  # NASDAQ
+            "^DJI",   # Dow Jones
+            "^RUT",   # Russell 2000
+            "^VIX",   # VIX
+            "^TNX",   # 10-Year Treasury
+            "^FTSE",  # FTSE 100
+            "^N225",  # Nikkei 225
+        ],
+        "ETFs": [
+            "SPY", "QQQ", "IWM", "VTI", "VOO", "VEA", "VWO", "AGG", 
+            "BND", "GLD", "SLV", "TLT", "XLF", "XLK", "XLE", "XLV"
+        ],
+        "Crypto": [
+            "BTC-USD", "ETH-USD", "ADA-USD", "SOL-USD", "DOGE-USD"
+        ]
+    }
+
+def search_ticker_info(ticker):
+    """Get basic info about a ticker"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        return {
+            'Name': info.get('longName', 'N/A'),
+            'Sector': info.get('sector', 'N/A'),
+            'Industry': info.get('industry', 'N/A'),
+            'Market Cap': info.get('marketCap', 'N/A'),
+            'Currency': info.get('currency', 'N/A')
+        }
+    except:
+        return None
+
+def create_ticker_search_widget():
+    """Create a ticker search widget"""
+    with st.expander("🔍 Ticker Search & Info"):
+        search_ticker = st.text_input("Search for ticker information:", placeholder="e.g., AAPL")
+        
+        if search_ticker and st.button("Search"):
+            ticker_info = search_ticker_info(search_ticker.upper())
+            if ticker_info:
+                st.write("**Company Information:**")
+                for key, value in ticker_info.items():
+                    st.write(f"• **{key}**: {value}")
+            else:
+                st.error("Could not fetch information for this ticker")
+
+def create_ticker_selection_interface():
+    """Create the ticker selection interface"""
+    st.subheader("📈 Fetch Real Market Data")
+    
+    # Add ticker search widget
+    create_ticker_search_widget()
+    
+    # Get popular tickers
+    popular_tickers = get_popular_tickers()
+    
+    # Selection method
+    selection_method = st.radio(
+        "How would you like to select data?",
+        ["Choose from Popular Lists", "Enter Custom Ticker(s)", "Upload Ticker List"],
+        key="ticker_selection_method"
+    )
+    
+    selected_tickers = []
+    
+    if selection_method == "Choose from Popular Lists":
+        st.write("**Select from popular categories:**")
+        
+        # Create tabs for different categories
+        tabs = st.tabs(list(popular_tickers.keys()))
+        
+        for i, (category, tickers) in enumerate(popular_tickers.items()):
+            with tabs[i]:
+                selected_from_category = st.multiselect(
+                    f"Select {category}:",
+                    tickers,
+                    key=f"select_{category}"
+                )
+                selected_tickers.extend(selected_from_category)
+    
+    elif selection_method == "Enter Custom Ticker(s)":
+        ticker_input = st.text_input(
+            "Enter ticker symbols (comma-separated):",
+            placeholder="e.g., AAPL, MSFT, GOOGL",
+            help="Enter one or more ticker symbols separated by commas"
+        )
+        if ticker_input:
+            selected_tickers = [ticker.strip().upper() for ticker in ticker_input.split(",") if ticker.strip()]
+    
+    elif selection_method == "Upload Ticker List":
+        uploaded_tickers = st.file_uploader(
+            "Upload a text file with ticker symbols (one per line)",
+            type=['txt'],
+            key="ticker_file"
+        )
+        if uploaded_tickers:
+            ticker_content = uploaded_tickers.read().decode('utf-8')
+            selected_tickers = [ticker.strip().upper() for ticker in ticker_content.split('\n') if ticker.strip()]
+            st.write(f"Loaded {len(selected_tickers)} tickers from file")
+    
+    return selected_tickers
+
+def plot_ticker_comparison(ticker_dataframes, selected_ticker=None):
+    """Plot comparison of multiple tickers"""
+    if len(ticker_dataframes) <= 1:
+        return None
+    
+    fig, ax = plt.subplots(figsize=(14, 8))
+    
+    # Normalize prices to starting value for comparison
+    for ticker, data in ticker_dataframes.items():
+        normalized_prices = (data['Close'] / data['Close'].iloc[0]) * 100
+        line_style = '-' if ticker == selected_ticker else '--'
+        line_width = 2.5 if ticker == selected_ticker else 1.5
+        alpha = 1.0 if ticker == selected_ticker else 0.7
+        
+        ax.plot(range(len(normalized_prices)), normalized_prices, 
+               label=ticker, linestyle=line_style, linewidth=line_width, alpha=alpha)
+    
+    ax.set_title("Ticker Performance Comparison (Normalized to 100)", fontsize=16, fontweight='bold')
+    ax.set_xlabel('Days', fontsize=12)
+    ax.set_ylabel('Normalized Price (Starting Price = 100)', fontsize=12)
+    ax.legend(fontsize=10, bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax.grid(True, alpha=0.3)
+    
+    # Highlight selected ticker
+    if selected_ticker:
+        ax.text(0.02, 0.98, f"Training on: {selected_ticker}", 
+               transform=ax.transAxes, fontsize=12, fontweight='bold',
+               bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7),
+               verticalalignment='top')
+    
+    plt.tight_layout()
+    return fig
+
+def display_ticker_data_interface():
+    """Display the complete ticker data fetching interface"""
+    st.markdown("---")
+    
+    # Ticker selection
+    selected_tickers = create_ticker_selection_interface()
+    
+    if selected_tickers:
+        st.write(f"**Selected tickers:** {', '.join(selected_tickers)}")
+        
+        # Date range selection
+        col1, col2 = st.columns(2)
+        with col1:
+            start_date = st.date_input(
+                "Start Date",
+                value=pd.Timestamp.now() - pd.Timedelta(days=365),
+                key="ticker_start_date"
+            )
+        with col2:
+            end_date = st.date_input(
+                "End Date",
+                value=pd.Timestamp.now(),
+                key="ticker_end_date"
+            )
+        
+        # Fetch data button
+        if st.button("📊 Fetch Market Data", type="primary", use_container_width=True):
+            if len(selected_tickers) == 1:
+                # Single ticker
+                ticker_data = fetch_ticker_data(selected_tickers[0], pd.Timestamp(start_date), pd.Timestamp(end_date))
+                if ticker_data is not None:
+                    st.session_state.df = ticker_data
+                    st.session_state.current_ticker = selected_tickers[0]
+                    st.success(f"✅ Data for {selected_tickers[0]} loaded successfully!")
+                    
+                    # Display basic info
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Ticker", selected_tickers[0])
+                    with col2:
+                        st.metric("Days of Data", len(ticker_data))
+                    with col3:
+                        st.metric("Current Price", f"${ticker_data['Close'].iloc[-1]:.2f}")
+                    
+                    # Show preview
+                    st.write("**Data Preview:**")
+                    st.dataframe(ticker_data.head())
+            
+            else:
+                # Multiple tickers
+                ticker_dataframes = fetch_multiple_tickers(selected_tickers, pd.Timestamp(start_date), pd.Timestamp(end_date))
+                if ticker_dataframes:
+                    # Let user choose which ticker to use for training
+                    st.success(f"✅ Fetched data for {len(ticker_dataframes)} tickers")
+                    
+                    available_tickers = list(ticker_dataframes.keys())
+                    selected_for_training = st.selectbox(
+                        "Select ticker for model training:",
+                        available_tickers,
+                        key="training_ticker"
+                    )
+                    
+                    if selected_for_training:
+                        st.session_state.df = ticker_dataframes[selected_for_training]
+                        st.session_state.current_ticker = selected_for_training
+                        st.session_state.all_ticker_data = ticker_dataframes
+                        
+                        # Display comparison metrics
+                        st.write("**Ticker Comparison:**")
+                        comparison_data = []
+                        for ticker, data in ticker_dataframes.items():
+                            comparison_data.append({
+                                'Ticker': ticker,
+                                'Days': len(data),
+                                'Current Price': f"${data['Close'].iloc[-1]:.2f}",
+                                'Price Change (%)': f"{((data['Close'].iloc[-1] / data['Close'].iloc[0]) - 1) * 100:.2f}%",
+                                'Avg Volume': f"{data['Volume'].mean():,.0f}"
+                            })
+                        
+                        comparison_df = pd.DataFrame(comparison_data)
+                        st.dataframe(comparison_df, use_container_width=True)
+                        
+                        # Show preview of selected ticker
+                        st.write(f"**Data Preview for {selected_for_training}:**")
+                        st.dataframe(ticker_dataframes[selected_for_training].head())
+                        
+                        # Plot comparison chart
+                        st.subheader("📊 Ticker Performance Comparison")
+                        fig = plot_ticker_comparison(ticker_dataframes, selected_for_training)
+                        st.pyplot(fig)
+    
+    return len(selected_tickers) > 0 if selected_tickers else False
+
 # Streamlit App
 def main():
     st.title("🔮 Stock Price Prediction with Transformer Model")
@@ -455,6 +793,8 @@ def main():
                                                 help="Add S&P 500 and NASDAQ indices for market context")
     enhance_volume_features = st.sidebar.checkbox("📈 Enhanced Volume Features", value=True,
                                                  help="Add volume moving averages, ratios, and momentum")
+    include_industry_etf = st.sidebar.checkbox("🏭 Industry ETF Features", value=True,
+                                              help="Add industry ETF data for sector-specific context")
     
     # Model type selection
     st.sidebar.markdown("---")
@@ -477,6 +817,13 @@ def main():
                 st.write("• Volume moving averages (5, 20 days)")
                 st.write("• Volume ratios & momentum")
                 st.write("• Price-volume relationships")
+            
+            if include_industry_etf:
+                st.write("**Industry ETF Features:**")
+                st.write("• Industry ETF price & volume data")
+                st.write("• Stock vs industry performance")
+                st.write("• Industry correlation & beta")
+                st.write("• Sector-specific context")
     
     # Load data
     # Use session state to store the dataframe across reruns
@@ -530,6 +877,10 @@ def main():
                 features_available.append("✅ Market Indices (SPX, NASDAQ)")
             else:
                 features_available.append("⚠️ Market Indices (enable in sidebar for market context)")
+            if include_industry_etf:
+                features_available.append("✅ Industry ETF Features")
+            else:
+                features_available.append("⚠️ Industry ETF Features (enable in sidebar for sector context)")
             
             for feature in features_available:
                 st.write(feature)
@@ -556,6 +907,10 @@ def main():
                         features_available.append("❌ Market Indices (not available with synthetic data)")
                     else:
                         features_available.append("❌ Market Indices (would be available with real CSV data)")
+                    if not include_industry_etf:
+                        features_available.append("❌ Industry ETF Features (not available with synthetic data)")
+                    else:
+                        features_available.append("❌ Industry ETF Features (require real ticker data)")
                     
                     for feature in features_available:
                         st.write(feature)
@@ -575,6 +930,15 @@ def main():
         if hasattr(st.session_state, 'current_ticker'):
             st.sidebar.info(f"📊 Current Ticker: **{st.session_state.current_ticker}**")
             
+            # Add industry information if industry ETF features are enabled
+            if include_industry_etf:
+                try:
+                    ticker_info = get_ticker_industry_info(st.session_state.current_ticker)
+                    if ticker_info and ticker_info.get('industry_etf'):
+                        st.sidebar.info(f"🏭 Industry: **{ticker_info['industry']}**\n📈 ETF: **{ticker_info['industry_etf']}**")
+                except:
+                    pass
+            
             # Add quick stats
             current_price = df['Close'].iloc[-1]
             price_change = df['Close'].iloc[-1] - df['Close'].iloc[-2] if len(df) > 1 else 0
@@ -592,6 +956,7 @@ def main():
             config_info += f"- Model: Enhanced\n"
             config_info += f"- Market Indices: {'✅' if include_market_indices else '❌'}\n"
             config_info += f"- Volume Features: {'✅' if enhance_volume_features else '❌'}\n"
+            config_info += f"- Industry ETF: {'✅' if include_industry_etf else '❌'}\n"
             st.sidebar.info(config_info)
         else:
             st.sidebar.info("🔧 **Current Configuration:**\n- Model: Basic (OHLCV only)")
@@ -689,11 +1054,16 @@ def main():
             with st.spinner("Preprocessing data..."):
                 # Choose preprocessing method based on model type
                 if model_type == "Enhanced Model (with selected features)":
-                    # Enhanced preprocessing with market context and volume features
+                    # Get ticker symbol for industry ETF features
+                    ticker_symbol = getattr(st.session_state, 'current_ticker', None)
+                    
+                    # Enhanced preprocessing with market context, volume features, and industry ETF
                     scaled_data, scaler_features, scaler_target, enhanced_df, feature_names = load_and_preprocess_data_enhanced(
                         df, 
                         include_indices=include_market_indices, 
-                        enhance_volume=enhance_volume_features
+                        enhance_volume=enhance_volume_features,
+                        include_industry_etf=include_industry_etf,
+                        ticker_symbol=ticker_symbol
                     )
                     
                     st.info(f"Using enhanced features: {', '.join(feature_names)}")
@@ -706,6 +1076,13 @@ def main():
                     
                     if enhance_volume_features:
                         st.success("✅ Enhanced volume features integrated!")
+                    
+                    if include_industry_etf and 'Industry_ETF_Close' in enhanced_df.columns:
+                        st.success(f"✅ Industry ETF features integrated for {ticker_symbol}!")
+                    elif include_industry_etf and ticker_symbol:
+                        st.warning(f"⚠️ Industry ETF features requested but not available for {ticker_symbol}")
+                    elif include_industry_etf:
+                        st.warning("⚠️ Industry ETF features requested but no ticker symbol available")
                     
                 else:
                     # Basic preprocessing
@@ -975,6 +1352,10 @@ def main():
                 if include_market_indices and any('SPX' in f or 'NASDAQ' in f for f in feature_names):
                     market_feats = [f for f in feature_names if 'SPX' in f or 'NASDAQ' in f]
                     feature_info += f"- Market features: {', '.join(market_feats)}\n"
+                
+                if include_industry_etf and any('Industry_ETF' in f for f in feature_names):
+                    industry_feats = [f for f in feature_names if 'Industry_ETF' in f or 'Industry' in f]
+                    feature_info += f"- Industry ETF features: {', '.join(industry_feats)}\n"
                 
                 st.info(feature_info)
             
@@ -1327,3 +1708,223 @@ def create_ticker_search_widget():
                         st.write(f"**{key}:** {value}")
             else:
                 st.error(f"Could not find information for {search_ticker.upper()}")
+
+def get_industry_etf_mapping():
+    """Map industries to their corresponding ETFs"""
+    return {
+        # Technology
+        'Software': 'XLK',
+        'Semiconductors': 'SOXX',
+        'Technology Hardware': 'XLK',
+        'Computer Hardware': 'XLK',
+        'Internet Content & Information': 'XLK',
+        'Electronic Gaming & Multimedia': 'XLK',
+        'Software - Application': 'XLK',
+        'Software - Infrastructure': 'XLK',
+        
+        # Healthcare
+        'Biotechnology': 'XBI',
+        'Drug Manufacturers': 'XLV',
+        'Medical Devices': 'XLV',
+        'Healthcare': 'XLV',
+        'Pharmaceuticals': 'XLV',
+        'Medical Instruments & Supplies': 'XLV',
+        'Health Information Services': 'XLV',
+        
+        # Financial
+        'Banks': 'XLF',
+        'Financial Services': 'XLF',
+        'Insurance': 'XLF',
+        'Asset Management': 'XLF',
+        'Credit Services': 'XLF',
+        'Capital Markets': 'XLF',
+        
+        # Energy
+        'Oil & Gas': 'XLE',
+        'Oil & Gas E&P': 'XLE',
+        'Oil & Gas Integrated': 'XLE',
+        'Oil & Gas Refining & Marketing': 'XLE',
+        'Oil & Gas Equipment & Services': 'XLE',
+        'Renewable Energy': 'ICLN',
+        
+        # Consumer
+        'Consumer Cyclical': 'XLY',
+        'Consumer Defensive': 'XLP',
+        'Retail': 'XRT',
+        'Automotive': 'CARZ',
+        'Restaurants': 'XLY',
+        'Apparel Manufacturing': 'XLY',
+        'Home Improvement Retail': 'XLY',
+        'Internet Retail': 'XLY',
+        
+        # Industrial
+        'Industrials': 'XLI',
+        'Aerospace & Defense': 'ITA',
+        'Airlines': 'JETS',
+        'Transportation': 'XTN',
+        'Construction': 'XLI',
+        'Machinery': 'XLI',
+        
+        # Materials
+        'Materials': 'XLB',
+        'Steel': 'SLX',
+        'Mining': 'XME',
+        'Chemicals': 'XLB',
+        'Construction Materials': 'XLB',
+        
+        # Utilities
+        'Utilities': 'XLU',
+        'Electric Utilities': 'XLU',
+        'Gas Utilities': 'XLU',
+        'Water Utilities': 'XLU',
+        
+        # Real Estate
+        'Real Estate': 'XLRE',
+        'REIT': 'VNQ',
+        
+        # Communication
+        'Communication Services': 'XLC',
+        'Telecommunications': 'XLC',
+        'Media': 'XLC',
+        'Entertainment': 'XLC',
+        
+        # Default fallback
+        'Other': 'SPY'  # Use SPY as default
+    }
+
+def get_ticker_industry_info(ticker):
+    """Get detailed industry information for a ticker"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        # Extract industry information
+        sector = info.get('sector', 'Unknown')
+        industry = info.get('industry', 'Unknown')
+        
+        # Map to ETF
+        industry_etf_map = get_industry_etf_mapping()
+        
+        # Try to find the best matching ETF
+        industry_etf = None
+        for key, etf in industry_etf_map.items():
+            if key.lower() in industry.lower() or key.lower() in sector.lower():
+                industry_etf = etf
+                break
+        
+        # Fallback to sector-based mapping
+        if not industry_etf:
+            sector_etf_map = {
+                'Technology': 'XLK',
+                'Healthcare': 'XLV',
+                'Financial Services': 'XLF',
+                'Energy': 'XLE',
+                'Consumer Cyclical': 'XLY',
+                'Consumer Defensive': 'XLP',
+                'Industrials': 'XLI',
+                'Materials': 'XLB',
+                'Utilities': 'XLU',
+                'Real Estate': 'XLRE',
+                'Communication Services': 'XLC'
+            }
+            industry_etf = sector_etf_map.get(sector, 'SPY')
+        
+        return {
+            'ticker': ticker,
+            'company_name': info.get('longName', 'N/A'),
+            'sector': sector,
+            'industry': industry,
+            'industry_etf': industry_etf,
+            'market_cap': info.get('marketCap', 'N/A'),
+            'currency': info.get('currency', 'N/A')
+        }
+        
+    except Exception as e:
+        st.warning(f"Could not fetch industry info for {ticker}: {str(e)}")
+        return {
+            'ticker': ticker,
+            'company_name': 'N/A',
+            'sector': 'Unknown',
+            'industry': 'Unknown',
+            'industry_etf': 'SPY',  # Default to SPY
+            'market_cap': 'N/A',
+            'currency': 'N/A'
+        }
+
+def fetch_industry_etf_data(industry_etf, start_date, end_date):
+    """Fetch industry-specific ETF data"""
+    try:
+        st.info(f"Fetching industry ETF data for {industry_etf}...")
+        
+        # Add buffer days
+        start_date_buffer = start_date - pd.Timedelta(days=10)
+        end_date_buffer = end_date + pd.Timedelta(days=5)
+        
+        # Fetch ETF data
+        etf_data = yf.download(industry_etf, start=start_date_buffer, end=end_date_buffer, progress=False)
+        
+        if etf_data.empty:
+            st.warning(f"No data available for industry ETF {industry_etf}")
+            return None
+        
+        # Reset index and rename columns
+        etf_data = etf_data.reset_index()
+        etf_data = etf_data.rename(columns={
+            'Close': f'{industry_etf}_Close',
+            'Volume': f'{industry_etf}_Volume'
+        })
+        
+        # Select relevant columns
+        etf_data = etf_data[['Date', f'{industry_etf}_Close', f'{industry_etf}_Volume']]
+        
+        st.success(f"✅ Successfully fetched industry ETF data for {industry_etf}")
+        return etf_data
+        
+    except Exception as e:
+        st.error(f"Error fetching industry ETF data for {industry_etf}: {str(e)}")
+        return None
+
+def add_industry_context_features(df, ticker_info, include_industry_etf=True):
+    """Add industry-specific ETF features to the dataset"""
+    enhanced_df = df.copy()
+    
+    if not include_industry_etf or not ticker_info:
+        return enhanced_df
+    
+    if 'Date' in enhanced_df.columns:
+        enhanced_df['Date'] = pd.to_datetime(enhanced_df['Date'])
+        start_date = enhanced_df['Date'].min()
+        end_date = enhanced_df['Date'].max()
+        
+        industry_etf = ticker_info.get('industry_etf', 'SPY')
+        
+        # Fetch industry ETF data
+        etf_data = fetch_industry_etf_data(industry_etf, start_date, end_date)
+        
+        if etf_data is not None:
+            # Merge with main dataframe
+            enhanced_df = enhanced_df.merge(etf_data, on='Date', how='left')
+            
+            etf_close_col = f'{industry_etf}_Close'
+            etf_volume_col = f'{industry_etf}_Volume'
+            
+            # Forward fill missing values
+            enhanced_df[etf_close_col] = enhanced_df[etf_close_col].fillna(method='ffill').fillna(enhanced_df[etf_close_col].bfill())
+            enhanced_df[etf_volume_col] = enhanced_df[etf_volume_col].fillna(method='ffill').fillna(enhanced_df[etf_volume_col].bfill())
+            
+            # Create industry-relative features
+            enhanced_df[f'Stock_vs_{industry_etf}'] = enhanced_df['Close'] / enhanced_df[etf_close_col]
+            enhanced_df[f'{industry_etf}_Returns'] = enhanced_df[etf_close_col].pct_change()
+            enhanced_df['Stock_Returns'] = enhanced_df['Close'].pct_change()
+            
+            # Industry correlation features
+            enhanced_df[f'{industry_etf}_Correlation'] = enhanced_df['Stock_Returns'].rolling(window=20).corr(enhanced_df[f'{industry_etf}_Returns'])
+            
+            # Industry momentum features
+            enhanced_df[f'{industry_etf}_Momentum'] = enhanced_df[etf_close_col].pct_change(periods=5)
+            enhanced_df['Stock_Industry_Beta'] = enhanced_df['Stock_Returns'].rolling(window=30).cov(enhanced_df[f'{industry_etf}_Returns']) / enhanced_df[f'{industry_etf}_Returns'].rolling(window=30).var()
+            
+            # Volume comparison with industry
+            enhanced_df[f'Volume_vs_{industry_etf}'] = enhanced_df['Volume'] / enhanced_df[etf_volume_col]
+            
+    return enhanced_df
