@@ -756,7 +756,12 @@ def search_ticker_info(ticker):
     """Get basic info about a ticker"""
     try:
         stock = yf.Ticker(ticker)
+        # The .info dictionary is a common point of failure.
+        # It can be empty or missing for invalid tickers or due to API changes.
         info = stock.info
+        
+        # A robust check is to see if a critical piece of info like 'longName' exists.
+        # An empty info dict or one
         
         return {
             'Name': info.get('longName', 'N/A'),
