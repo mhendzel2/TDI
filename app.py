@@ -1362,73 +1362,17 @@ def main():
                 if model_architecture == "Galformer (Advanced)":
                     # Galformer sequences
                     X_enc, X_dec, y = create_sequences_for_galformer(
-                        scaled_data, sequence_length, label_len, pred_len, target_column_index=feature_names.index('Close')
+                        scaled_data,
+                        sequence_length,
+                        label_len,
+                        pred_len,
+                        target_column_index=feature_names.index('Close')
                     )
-                    
-                    # Split data
-                    X_enc_train, X_enc_test, X_dec_train, X_dec_test, y_train, y_test = train_test_split_temporal_galformer(
-                        X_enc, X_dec, y
-                    )
-                    
-                    st.success(f"Galformer data prepared! Training sequences: {len(X_enc_train)}")
-                    
-                    # Build Galformer model
-                    input_shape = (sequence_length, X_enc.shape[-1])
-                    
-                    model = build_galformer_model(
-                        input_shape=input_shape,
-                        d_model=d_model,
-                        n_heads=num_heads,
-                        e_layers=e_layers,
-                        d_layers=d_layers,
-                        d_ff=ff_dim,
-                        factor=factor,
-                        dropout=0.1,
-                        label_len=label_len,
-                        pred_len=pred_len
-                    )
-                    
-                    model.compile(
-                        optimizer=keras.optimizers.Adam(learning_rate=0.001),
-                        loss='mse',
-                        metrics=['mae']
-                    )
-                    
-                    st.success("Galformer model built successfully!")
-                    st.info(f"Model input shapes: Encoder {X_enc_train.shape}, Decoder {X_dec_train.shape}")
-                    
-                    # Train model
-                    callbacks = [
-                        keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
-                    ]
-                    
-                    history = model.fit(
-                        [X_enc_train, X_dec_train], y_train,
-                        epochs=epochs,
-                        batch_size=batch_size,
-                        validation_split=0.2,
-                        callbacks=callbacks,
-                        verbose=0
-                    )
-                    
-                    # Make predictions
-                    y_pred = model.predict([X_enc_test, X_dec_test], verbose=0)
-                    
-                    # For Galformer, we need to handle the sequence predictions differently
-                    if len(y_pred.shape) > 1 and y_pred.shape[1] > 1:
-                        # Take the first prediction from each sequence
-                        y_pred_single = y_pred[:, 0]
-                        y_test_single = y_test[:, 0]
-                    else:
-                        y_pred_single = y_pred.flatten()
-                        y_test_single = y_test.flatten()
-                    
-                    # Inverse transform
-                    y_pred_original = scaler_target.inverse_transform(y_pred_single.reshape(-1, 1)).flatten()
-                    y_test_original = scaler_target.inverse_transform(y_test_single.reshape(-1, 1)).flatten()
-                    
+                    # Split data for Galformer
+                    X_enc_train, X_enc_test, X_dec_train, X_dec_test, y_train, y_test = \
+                        train_test_split_temporal_galformer(X_enc, X_dec, y)
                 else:
-                    # Standard Transformer
+                    # Standard Transformer sequences
                     X, y = create_sequences(scaled_data, sequence_length)
                     X_train, X_test, y_train, y_test = train_test_split_temporal(X, y)
                     
