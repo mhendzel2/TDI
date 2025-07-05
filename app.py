@@ -107,7 +107,7 @@ class SeasonalLayer(layers.Layer):
         
         # Stack and average the seasonal features
         stacked_seasons = tf.stack(seasonal_outputs, axis=-1)
-        season_output = tf.reduce_mean(stacked_seasons, axis=-1)
+        season_output = tf.reduce_mean(stacked_seasonal_outputs, axis=-1)
         
         return season_output
 
@@ -1085,6 +1085,195 @@ def load_and_preprocess_data(df):
     scaled_target = scaler_target.transform(target_data)
     
     return scaled_data, scaler_features, scaler_target, df
+
+# Add these functions right before the main() function (around line 1150)
+
+def create_ticker_selection_interface():
+    """Create interface for ticker selection"""
+    st.subheader("📊 Fetch Market Data")
+    st.info("Select tickers to fetch historical stock data from Yahoo Finance")
+    
+    # Create tabs for different selection methods
+    tab1, tab2, tab3 = st.tabs(["📈 Popular Lists", "✏️ Custom Entry", "📁 File Upload"])
+    
+    with tab1:
+        st.write("**Select from popular categories:**")
+        popular_tickers = get_popular_tickers()
+        
+        selected_category = st.selectbox("Choose Category:", list(popular_tickers.keys()))
+        selected_tickers = st.multiselect(
+            f"Select {selected_category}:",
+            popular_tickers[selected_category],
+            default=popular_tickers[selected_category][:3] if selected_category == "Popular Stocks" else []
+        )
+        
+        return selected_tickers
+    
+    with tab2:
+        st.write("**Enter ticker symbols manually:**")
+        custom_input = st.text_input(
+            "Ticker Symbols (comma-separated):",
+            placeholder="e.g., AAPL, MSFT, GOOGL",
+            help="Enter one or more ticker symbols separated by commas"
+        )
+        
+        selected_tickers = []
+        if custom_input:
+            selected_tickers = [ticker.strip().upper() for ticker in custom_input.split(",") if ticker.strip()]
+        
+        return selected_tickers
+    
+    with tab3:
+        st.write("**Upload a text file with ticker symbols:**")
+        uploaded_file = st.file_uploader(
+            "Choose a text file", 
+            type=['txt'],
+            help="Upload a .txt file with one ticker symbol per line"
+        )
+        
+        selected_tickers = []
+        if uploaded_file:
+            try:
+                content = uploaded_file.read().decode('utf-8')
+                selected_tickers = [line.strip().upper() for line in content.split('\n') if line.strip()]
+                st.success(f"Loaded {len(selected_tickers)} tickers from file")
+            except Exception as e:
+                st.error(f"Error reading file: {str(e)}")
+        
+        return selected_tickers
+
+def display_ticker_data_interface():
+    """Main interface for ticker data selection and fetching"""
+    
+    # Add ticker search widget
+    create_ticker_search_widget()
+    
+    # Date range selection
+    st.subheader("📅 Select Date Range")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        start_date = st.date_input(
+            "Start Date:",
+            value=datetime.now() - timedelta(days=365),
+            max_value=datetime.now() - timedelta(days=1)
+        )
+    
+    with col2:
+        end_date = st.date_input(
+            "End Date:",
+            value=datetime.now() - timedelta(days=1),
+            min_value=start_date,
+            max_value=datetime.now()
+        )
+    
+    # Ticker selection
+    selected_tickers = create_ticker_selection_interface()
+    
+    if not selected_tickers:
+        st.warning("Please select at least one ticker symbol.")
+        return False
+    
+    st.write(f"**Selected tickers:** {', '.join(selected_tickers)}")
+    
+    # Fetch data button
+    if st.button("📊 Fetch Market Data", type="primary"):
+        with st.spinner(f"Fetching data for {len(selected_tickers)} ticker(s)..."):
+            
+            if len(selected_tickers) == 1:
+                # Single ticker
+                ticker = selected_tickers[0]
+                ticker_data = fetch_ticker_data(ticker, start_date, end_date)
+                
+                if ticker_data is not None:
+                    st.session_state.df = ticker_data
+                    st.session_state.current_ticker = ticker
+                    st.success(f"✅ Data loaded for {ticker}")
+                    return True
+                else:
+                    st.error(f"Failed to fetch data for {ticker}")
+                    return False
+            
+            else:
+                # Multiple tickers
+                ticker_dataframes = fetch_multiple_tickers(selected_tickers, start_date, end_date)
+                
+                if ticker_dataframes and len(ticker_dataframes) > 0:
+                    st.session_state.all_ticker_data = ticker_dataframes
+                    
+                    # Let user choose which ticker to use for training
+                    st.subheader("📊 Select Ticker for Model Training")
+                    
+                    # Show comparison chart first
+                    comparison_fig = plot_ticker_comparison(ticker_dataframes)
+                    if comparison_fig:
+                        st.pyplot(comparison_fig)
+                    
+                    # Ticker selection for training
+                    available_tickers = list(ticker_dataframes.keys())
+                    selected_ticker = st.selectbox(
+                        "Choose ticker for model training:",
+                        available_tickers,
+                        help="This ticker will be used to train the prediction model"
+                    )
+                    
+                    if st.button("Use Selected Ticker", type="secondary"):
+                        st.session_state.df = ticker_dataframes[selected_ticker]
+                        st.session_state.current_ticker = selected_ticker
+                        st.success(f"✅ Using {selected_ticker} for model training")
+                        return True
+                    
+                    return True  # Data is available, even if not selected yet
+                else:
+                    st.error("Failed to fetch data for any of the selected tickers")
+                    return False
+    
+    # Check if data is already loaded
+    if hasattr(st.session_state, 'df') and st.session_state.df is not None:
+        return True
+    
+    return False
+
+def plot_ticker_comparison(ticker_dataframes, highlight_ticker=None):
+    """Plot comparison of multiple tickers"""
+    try:
+        fig, ax = plt.subplots(figsize=(14, 8))
+        
+        # Normalize prices to start at 100 for comparison
+        for ticker, data in ticker_dataframes.items():
+            if len(data) > 0 and 'Close' in data.columns:
+                normalized_prices = (data['Close'] / data['Close'].iloc[0]) * 100
+                
+                if ticker == highlight_ticker:
+                    ax.plot(normalized_prices.index, normalized_prices, 
+                           label=ticker, linewidth=3, alpha=0.9)
+                else:
+                    ax.plot(normalized_prices.index, normalized_prices, 
+                           label=ticker, linewidth=2, alpha=0.7)
+        
+        ax.set_title("Ticker Performance Comparison (Normalized to 100)", fontsize=16, fontweight='bold')
+        ax.set_xlabel("Days", fontsize=12)
+        ax.set_ylabel("Normalized Price", fontsize=12)
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        return fig
+        
+    except Exception as e:
+        st.error(f"Error creating comparison chart: {str(e)}")
+        return None
+
+def train_test_split_temporal(X, y, test_size=0.2):
+    """Split time series data maintaining temporal order"""
+    split_idx = int(len(X) * (1 - test_size))
+    
+    X_train = X[:split_idx]
+    X_test = X[split_idx:]
+    y_train = y[:split_idx]
+    y_test = y[split_idx:]
+    
+    return X_train, X_test, y_train, y_test
 
 # Streamlit App
 def main():
