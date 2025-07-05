@@ -781,7 +781,12 @@ def get_popular_tickers():
         "Popular Stocks": [
             "AAPL", "MSFT", "GOOGL", "AMZN", "TSLA", "META", "NVDA", "NFLX", 
             "JPM", "JNJ", "V", "PG", "UNH", "HD", "MA", "DIS", "PYPL", "ADBE",
-            "CRM", "INTC", "CSCO", "PFE", "VZ", "KO", "PEP", "T", "XOM", "CVX"
+            "CRM", "INTC", "CSCO", "PFE", "VZ", "KO", "PEP", "T", "XOM", "CVX",
+            "SOFI", "PLTR", "COIN", "RBLX", "HOOD", "RIVN", "LCID", "F", "GM"
+        ],
+        "Growth Stocks": [
+            "SOFI", "PLTR", "COIN", "RBLX", "HOOD", "RIVN", "LCID", "UPST",
+            "AFRM", "SQ", "SHOP", "ROKU", "ZOOM", "SNOW", "CRWD", "NET"
         ],
         "Market Indices": [
             "^GSPC",  # S&P 500
@@ -795,298 +800,13 @@ def get_popular_tickers():
         ],
         "ETFs": [
             "SPY", "QQQ", "IWM", "VTI", "VOO", "VEA", "VWO", "AGG", 
-            "BND", "GLD", "SLV", "TLT", "XLF", "XLK", "XLE", "XLV"
+            "BND", "GLD", "SLV", "TLT", "XLF", "XLK", "XLE", "XLV",
+            "ARKK", "ARKQ", "ARKG", "SOXL", "TQQQ", "SPXL"
         ],
         "Crypto": [
-            "BTC-USD", "ETH-USD", "ADA-USD", "SOL-USD", "DOGE-USD"
+            "BTC-USD", "ETH-USD", "ADA-USD", "SOL-USD", "DOGE-USD", "MATIC-USD"
         ]
     }
-
-def search_ticker_info(ticker):
-    """Get basic info about a ticker"""
-    try:
-        stock = yf.Ticker(ticker)
-        # The .info dictionary is a common point of failure.
-        # It can be empty or missing for invalid tickers or due to API changes.
-        info = stock.info
-        
-        # A robust check is to see if a critical piece of info like 'longName' exists.
-        # An empty info dict or one
-        
-        return {
-            'Name': info.get('longName', 'N/A'),
-            'Sector': info.get('sector', 'N/A'),
-            'Industry': info.get('industry', 'N/A'),
-            'Market Cap': info.get('marketCap', 'N/A'),
-            'Currency': info.get('currency', 'N/A')
-        }
-    except:
-        return None
-
-def create_ticker_search_widget():
-    """Create a ticker search widget"""
-    with st.expander("🔍 Ticker Search & Info"):
-        search_ticker = st.text_input("Search for ticker information:", placeholder="e.g., AAPL")
-        
-        if search_ticker and st.button("Search"):
-            ticker_info = search_ticker_info(search_ticker.upper())
-            if ticker_info:
-                st.success(f"Found information for {search_ticker.upper()}:")
-                for key, value in ticker_info.items():
-                    if value != 'N/A':
-                        if key == 'Market Cap' and isinstance(value, (int, float)):
-                            value = f"${value:,.0f}"
-                        st.write(f"**{key}:** {value}")
-            else:
-                st.error(f"Could not find information for {search_ticker.upper()}")
-
-def get_industry_etf_mapping():
-    """Map industries to their corresponding ETFs"""
-    return {
-        # Technology
-        'Software': 'XLK',
-        'Semiconductors': 'SOXX',
-        'Technology Hardware': 'XLK',
-        'Computer Hardware': 'XLK',
-        'Internet Content & Information': 'XLK',
-        'Electronic Gaming & Multimedia': 'XLK',
-        'Software - Application': 'XLK',
-        'Software - Infrastructure': 'XLK',
-        
-        # Healthcare
-        'Biotechnology': 'XBI',
-        'Drug Manufacturers': 'XLV',
-        'Medical Devices': 'XLV',
-        'Healthcare': 'XLV',
-        'Pharmaceuticals': 'XLV',
-        'Medical Instruments & Supplies': 'XLV',
-        'Health Information Services': 'XLV',
-        
-        # Financial
-        'Banks': 'XLF',
-        'Financial Services': 'XLF',
-        'Insurance': 'XLF',
-        'Asset Management': 'XLF',
-        'Credit Services': 'XLF',
-        'Capital Markets': 'XLF',
-        
-        # Energy
-        'Oil & Gas': 'XLE',
-        'Oil & Gas E&P': 'XLE',
-        'Oil & Gas Integrated': 'XLE',
-        'Oil & Gas Refining & Marketing': 'XLE',
-        'Oil & Gas Equipment & Services': 'XLE',
-        'Renewable Energy': 'ICLN',
-        
-        # Consumer
-        'Consumer Cyclical': 'XLY',
-        'Consumer Defensive': 'XLP',
-        'Retail': 'XRT',
-        'Automotive': 'CARZ',
-        'Restaurants': 'XLY',
-        'Apparel Manufacturing': 'XLY',
-        'Home Improvement Retail': 'XLY',
-        'Internet Retail': 'XLY',
-        
-        # Industrial
-        'Industrials': 'XLI',
-        'Aerospace & Defense': 'ITA',
-        'Airlines': 'JETS',
-        'Transportation': 'XTN',
-        'Construction': 'XLI',
-        'Machinery': 'XLI',
-        
-        # Materials
-        'Materials': 'XLB',
-        'Steel': 'SLX',
-        'Mining': 'XME',
-        'Chemicals': 'XLB',
-        'Construction Materials': 'XLB',
-        
-        # Utilities
-        'Utilities': 'XLU',
-        'Electric Utilities': 'XLU',
-        'Gas Utilities': 'XLU',
-        'Water Utilities': 'XLU',
-        
-        # Real Estate
-        'Real Estate': 'XLRE',
-        'REIT': 'VNQ',
-        
-        # Communication
-        'Communication Services': 'XLC',
-        'Telecommunications': 'XLC',
-        'Media': 'XLC',
-        'Entertainment': 'XLC',
-        
-        # Default fallback
-        'Other': 'SPY'  # Use SPY as default
-    }
-
-def get_ticker_industry_info(ticker):
-    """Get detailed industry information for a ticker"""
-    try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        
-        # Extract industry information
-        sector = info.get('sector', 'Unknown')
-        industry = info.get('industry', 'Unknown')
-        
-        # Map to ETF
-        industry_etf_map = get_industry_etf_mapping()
-        
-        # Try to find the best matching ETF
-        industry_etf = None
-        for key, etf in industry_etf_map.items():
-            if key.lower() in industry.lower() or key.lower() in sector.lower():
-                industry_etf = etf
-                break
-        
-        # Fallback to sector-based mapping
-        if not industry_etf:
-            sector_etf_map = {
-                'Technology': 'XLK',
-                'Healthcare': 'XLV',
-                'Financial Services': 'XLF',
-                'Energy': 'XLE',
-                'Consumer Cyclical': 'XLY',
-                'Consumer Defensive': 'XLP',
-                'Industrials': 'XLI',
-                'Materials': 'XLB',
-                'Utilities': 'XLU',
-                'Real Estate': 'XLRE',
-                'Communication Services': 'XLC'
-            }
-            industry_etf = sector_etf_map.get(sector, 'SPY')
-        
-        return {
-            'ticker': ticker,
-            'company_name': info.get('longName', 'N/A'),
-            'sector': sector,
-            'industry': industry,
-            'industry_etf': industry_etf,
-            'market_cap': info.get('marketCap', 'N/A'),
-            'currency': info.get('currency', 'N/A')
-        }
-        
-    except Exception as e:
-        st.warning(f"Could not fetch industry info for {ticker}: {str(e)}")
-        return {
-            'ticker': ticker,
-            'company_name': 'N/A',
-            'sector': 'Unknown',
-            'industry': 'Unknown',
-            'industry_etf': 'SPY',  # Default to SPY
-            'market_cap': 'N/A',
-            'currency': 'N/A'
-        }
-
-def fetch_industry_etf_data(industry_etf, start_date, end_date):
-    """Fetch industry-specific ETF data"""
-    try:
-        st.info(f"Fetching industry ETF data for {industry_etf}...")
-        
-        # Add buffer days
-        start_date_buffer = start_date - pd.Timedelta(days=10)
-        end_date_buffer = end_date + pd.Timedelta(days=5)
-        
-        # Fetch ETF data
-        etf_data = yf.download(industry_etf, start=start_date_buffer, end=end_date_buffer, progress=False)
-        
-        if etf_data.empty:
-            st.warning(f"No data available for industry ETF {industry_etf}")
-            return None
-        
-        # Reset index and rename columns
-        etf_data = etf_data.reset_index()
-        etf_data = etf_data.rename(columns={
-            'Close': f'{industry_etf}_Close',
-            'Volume': f'{industry_etf}_Volume'
-        })
-        
-        # Select relevant columns
-        etf_data = etf_data[['Date', f'{industry_etf}_Close', f'{industry_etf}_Volume']]
-        
-        st.success(f"✅ Successfully fetched industry ETF data for {industry_etf}")
-        return etf_data
-        
-    except Exception as e:
-        st.error(f"Error fetching industry ETF data for {industry_etf}: {str(e)}")
-        return None
-
-def add_industry_context_features(df, ticker_info, include_industry_etf=True):
-    """Add industry-specific ETF features to the dataset"""
-    enhanced_df = df.copy()
-    
-    if not include_industry_etf or not ticker_info:
-        return enhanced_df
-    
-    if 'Date' in enhanced_df.columns:
-        enhanced_df['Date'] = pd.to_datetime(enhanced_df['Date'])
-        start_date = enhanced_df['Date'].min()
-        end_date = enhanced_df['Date'].max()
-        
-        industry_etf = ticker_info.get('industry_etf', 'SPY')
-        
-        # Fetch industry ETF data
-        etf_data = fetch_industry_etf_data(industry_etf, start_date, end_date)
-        
-        if etf_data is not None:
-            # Merge with main dataframe
-            enhanced_df = enhanced_df.merge(etf_data, on='Date', how='left')
-            
-            etf_close_col = f'{industry_etf}_Close'
-            etf_volume_col = f'{industry_etf}_Volume'
-            
-            # Forward fill missing values
-            enhanced_df[etf_close_col] = enhanced_df[etf_close_col].fillna(method='ffill').fillna(enhanced_df[etf_close_col].bfill())
-            enhanced_df[etf_volume_col] = enhanced_df[etf_volume_col].fillna(method='ffill').fillna(enhanced_df[etf_volume_col].bfill())
-            
-            # Create industry-relative features
-            enhanced_df['Stock_vs_Industry_ETF'] = enhanced_df['Close'] / enhanced_df[etf_close_col]
-            enhanced_df[f'{industry_etf}_Returns'] = enhanced_df[etf_close_col].pct_change()
-            enhanced_df['Stock_Returns'] = enhanced_df['Close'].pct_change()
-            
-            # Industry correlation features
-            enhanced_df[f'{industry_etf}_Correlation'] = enhanced_df['Stock_Returns'].rolling(window=20).corr(enhanced_df[f'{industry_etf}_Returns'])
-            
-            # Industry momentum features
-            enhanced_df[f'{industry_etf}_Momentum'] = enhanced_df[etf_close_col].pct_change(periods=5)
-            enhanced_df['Stock_Industry_Beta'] = enhanced_df['Stock_Returns'].rolling(window=30).cov(enhanced_df[f'{industry_etf}_Returns']) / enhanced_df[f'{industry_etf}_Returns'].rolling(window=30).var()
-            
-            # Volume comparison with industry
-            enhanced_df[f'Volume_vs_{industry_etf}'] = enhanced_df['Volume'] / enhanced_df[etf_volume_col]
-            
-    return enhanced_df
-
-def load_and_preprocess_data(df):
-    """Load and preprocess stock data"""
-    
-    # Ensure Date column is datetime
-    if 'Date' in df.columns:
-        df['Date'] = pd.to_datetime(df['Date'])
-        df = df.sort_values('Date').reset_index(drop=True)
-    
-    # Select features for model
-    feature_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-    data = df[feature_columns].values
-    
-    # Initialize scalers
-    scaler_features = MinMaxScaler()
-    scaler_target = MinMaxScaler()
-    
-    # Scale all features
-    scaled_data = scaler_features.fit_transform(data)
-    
-    # Scale target (Close price) separately for inverse transformation
-    target_data = df[['Close']].values
-    scaler_target.fit(target_data)
-    scaled_target = scaler_target.transform(target_data)
-    
-    return scaled_data, scaler_features, scaler_target, df
-
-# Add these functions right before the main() function (around line 1150)
 
 def create_ticker_selection_interface():
     """Create interface for ticker selection"""
@@ -1275,625 +995,570 @@ def train_test_split_temporal(X, y, test_size=0.2):
     
     return X_train, X_test, y_train, y_test
 
-# Streamlit App
+def train_test_split_temporal_galformer(X_enc, X_dec, y, test_size=0.2):
+    """Split Galformer data maintaining temporal order"""
+    split_idx = int(len(X_enc) * (1 - test_size))
+    
+    X_enc_train = X_enc[:split_idx]
+    X_enc_test = X_enc[split_idx:]
+    X_dec_train = X_dec[:split_idx]
+    X_dec_test = X_dec[split_idx:]
+    y_train = y[:split_idx]
+    y_test = y[split_idx:]
+    
+    return X_enc_train, X_enc_test, X_dec_train, X_dec_test, y_train, y_test
+
+# Industry ETF functions
+def get_industry_etf_mapping():
+    """Return mapping of industries to their corresponding ETFs"""
+    return {
+        'Technology': 'XLK',
+        'Software': 'XLK',
+        'Semiconductors': 'SOXX',
+        'Internet': 'FDN',
+        'Communication Services': 'XLC',
+        'Healthcare': 'XLV',
+        'Biotechnology': 'XBI',
+        'Pharmaceuticals': 'XLV',
+        'Financial Services': 'XLF',
+        'Banks': 'KBE',
+        'Insurance': 'KIE',
+        'Real Estate': 'XLRE',
+        'Energy': 'XLE',
+        'Oil & Gas': 'XLE',
+        'Utilities': 'XLU',
+        'Consumer Discretionary': 'XLY',
+        'Consumer Staples': 'XLP',
+        'Retail': 'XRT',
+        'Materials': 'XLB',
+        'Industrial': 'XLI',
+        'Transportation': 'IYT',
+        'Aerospace': 'ITA',
+        'Defense': 'ITA',
+        'Gold': 'GLD',
+        'Silver': 'SLV'
+    }
+
+def get_ticker_industry_info(ticker):
+    """Get industry information for a ticker"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        industry = info.get('industry', 'Unknown')
+        sector = info.get('sector', 'Unknown')
+        
+        # Map to ETF
+        etf_mapping = get_industry_etf_mapping()
+        industry_etf = None
+        
+        # Try to find ETF by industry first, then by sector
+        for key, etf in etf_mapping.items():
+            if key.lower() in industry.lower() or key.lower() in sector.lower():
+                industry_etf = etf
+                break
+        
+        # Default to SPY if no specific industry ETF found
+        if not industry_etf:
+            industry_etf = 'SPY'
+        
+        return {
+            'industry': industry,
+            'sector': sector,
+            'industry_etf': industry_etf
+        }
+    except:
+        return {
+            'industry': 'Unknown',
+            'sector': 'Unknown', 
+            'industry_etf': 'SPY'
+        }
+
+def fetch_industry_etf_data(etf_ticker, start_date, end_date):
+    """Fetch industry ETF data"""
+    try:
+        etf_data = yf.download(etf_ticker, start=start_date, end=end_date, progress=False)
+        if not etf_data.empty:
+            etf_data = etf_data.reset_index()
+            return etf_data[['Date', 'Close', 'Volume']].rename(columns={
+                'Close': f'Industry_ETF_Close',
+                'Volume': f'Industry_ETF_Volume'
+            })
+    except:
+        pass
+    return None
+
+def add_industry_context_features(df, ticker_info, include_industry_etf=True):
+    """Add industry ETF context features"""
+    if not include_industry_etf:
+        return df
+    
+    enhanced_df = df.copy()
+    
+    # Get date range
+    start_date = enhanced_df['Date'].min()
+    end_date = enhanced_df['Date'].max()
+    
+    # Fetch industry ETF data
+    industry_etf = ticker_info['industry_etf']
+    etf_data = fetch_industry_etf_data(industry_etf, start_date, end_date)
+    
+    if etf_data is not None:
+        # Merge with main dataframe
+        enhanced_df = enhanced_df.merge(etf_data, on='Date', how='left')
+        
+        # Forward fill missing values
+        enhanced_df['Industry_ETF_Close'] = enhanced_df['Industry_ETF_Close'].fillna(method='ffill').fillna(method='bfill')
+        enhanced_df['Industry_ETF_Volume'] = enhanced_df['Industry_ETF_Volume'].fillna(method='ffill').fillna(method='bfill')
+        
+        # Create relative performance features
+        enhanced_df['Stock_vs_Industry_ETF'] = enhanced_df['Close'] / enhanced_df['Industry_ETF_Close']
+        
+        # Industry ETF momentum features
+        enhanced_df['Industry_ETF_Returns'] = enhanced_df['Industry_ETF_Close'].pct_change()
+        enhanced_df['Stock_Returns'] = enhanced_df['Close'].pct_change()
+        
+        # Rolling correlation with industry
+        enhanced_df['Stock_Industry_Correlation'] = enhanced_df['Stock_Returns'].rolling(window=20).corr(enhanced_df['Industry_ETF_Returns'])
+        
+        # Beta calculation (simplified)
+        enhanced_df['Stock_Industry_Beta'] = enhanced_df['Stock_Returns'].rolling(window=60).cov(enhanced_df['Industry_ETF_Returns']) / enhanced_df['Industry_ETF_Returns'].rolling(window=60).var()
+        
+        # Volume comparison
+        enhanced_df['Industry_ETF_Relative_Volume'] = enhanced_df['Industry_ETF_Volume'] / enhanced_df['Industry_ETF_Volume'].rolling(window=20).mean()
+        
+        st.success(f"Added industry ETF features using {industry_etf} for {ticker_info['industry']}")
+    else:
+        st.warning(f"Could not fetch data for industry ETF {industry_etf}")
+    
+    return enhanced_df
+
+# Add the complete main function
 def main():
-    st.title("🔮 Stock Price Prediction with Transformer Model")
-    st.markdown("---")
-    
-    # Sidebar for configuration
-    st.sidebar.header("Model Configuration")
-    
-    # Data source selection
-    data_source = st.sidebar.radio(
-        "Select Data Source:",
-        ["Upload CSV File", "Fetch Market Data (yfinance)", "Generate Synthetic Data"]
+    st.set_page_config(
+        page_title="🚀 Advanced Stock Price Prediction",
+        page_icon="📈",
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
     
-    # Model hyperparameters
-    st.sidebar.subheader("Hyperparameters")
-    sequence_length = st.sidebar.slider("Sequence Length (days)", 30, 120, 60)
-    num_heads = st.sidebar.selectbox("Number of Attention Heads", [4, 8, 12], index=1)
-    num_transformer_blocks = st.sidebar.slider("Transformer Blocks", 1, 4, 2)
-    ff_dim = st.sidebar.selectbox("Feed Forward Dimension", [64, 128, 256], index=1)
-    epochs = st.sidebar.slider("Training Epochs", 10, 100, 50)
-    batch_size = st.sidebar.selectbox("Batch Size", [16, 32, 64], index=1)
+    st.title("🚀 Advanced Stock Price Prediction with Transformers")
+    st.markdown("**Predict stock prices using state-of-the-art Transformer and Galformer models**")
     
-    # Enhanced features
+    # Sidebar configuration
+    st.sidebar.title("⚙️ Configuration")
+    
+    # Model architecture selection
     st.sidebar.markdown("---")
-    st.sidebar.subheader("🚀 Enhanced Features")
-    st.sidebar.markdown("*Boost prediction accuracy with additional market context*")
+    st.sidebar.subheader("🏗️ Model Architecture")
+    model_architecture = st.sidebar.radio(
+        "Choose Model Architecture:",
+        ["Standard Transformer", "Galformer (Advanced)"],
+        help="Galformer uses autocorrelation and is better for capturing seasonal patterns"
+    )
     
-    include_market_indices = st.sidebar.checkbox("📊 Include SPX & NASDAQ", value=False, 
-                                                help="Add S&P 500 and NASDAQ indices for market context")
-    enhance_volume_features = st.sidebar.checkbox("📈 Enhanced Volume Features", value=True,
-                                                 help="Add volume moving averages, ratios, and momentum")
-    include_industry_etf = st.sidebar.checkbox("🏭 Industry ETF Features", value=True,
-                                              help="Add industry ETF data for sector-specific context")
+    # Data source selection
+    st.sidebar.subheader("📊 Data Source")
+    data_source = st.sidebar.radio(
+        "Choose your data source:",
+        ["Generate Synthetic Data", "Upload CSV File", "Fetch Market Data (yfinance)"]
+    )
     
-    # Model type selection
+    # Enhanced features selection
     st.sidebar.markdown("---")
-    model_type = st.sidebar.radio("🎯 Model Configuration:", 
-                                ["Basic Model (OHLCV only)", 
-                                 "Enhanced Model (with selected features)"],
-                                help="Choose between basic model or enhanced model with additional features")
+    st.sidebar.subheader("🔧 Enhanced Features")
+    model_type = st.sidebar.radio(
+        "Model Type:",
+        ["Basic Model (OHLCV only)", "Enhanced Model (with selected features)"]
+    )
     
-    # Information about enhanced features
+    # Enhanced features options
+    include_market_indices = False
+    enhance_volume_features = False
+    include_industry_etf = False
+    
     if model_type == "Enhanced Model (with selected features)":
-        with st.sidebar.expander("ℹ️ Enhanced Features Info"):
-            if include_market_indices:
-                st.write("**Market Indices Features:**")
-                st.write("• SPX & NASDAQ close prices")
-                st.write("• Relative performance vs indices")
-                st.write("• Market returns & correlations")
-            
-            if enhance_volume_features:
-                st.write("**Volume Features:**")
-                st.write("• Volume moving averages (5, 20 days)")
-                st.write("• Volume ratios & momentum")
-                st.write("• Price-volume relationships")
-            
-            if include_industry_etf:
-                st.write("**Industry ETF Features:**")
-                st.write("• Industry ETF price & volume data")
-                st.write("• Stock vs industry performance")
-                st.write("• Industry correlation & beta")
-                st.write("• Sector-specific context")
+        include_market_indices = st.sidebar.checkbox(
+            "Include SPX & NASDAQ indices",
+            value=True,
+            help="Add market context using S&P 500 and NASDAQ data"
+        )
+        enhance_volume_features = st.sidebar.checkbox(
+            "Enhanced Volume Features",
+            value=True,
+            help="Add volume analysis features (moving averages, ratios, momentum)"
+        )
+        include_industry_etf = st.sidebar.checkbox(
+            "Industry ETF Features",
+            value=False,
+            help="Add industry-specific ETF data for sector context"
+        )
     
-    # Load data
-    # Use session state to store the dataframe across reruns
+    # Model parameters
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("🎛️ Model Parameters")
+    
+    sequence_length = st.sidebar.slider("Sequence Length", 10, 100, 60, help="Number of days to look back")
+    epochs = st.sidebar.slider("Training Epochs", 10, 200, 50)
+    batch_size = st.sidebar.selectbox("Batch Size", [16, 32, 64, 128], index=1)
+    
+    if model_architecture == "Standard Transformer":
+        num_heads = st.sidebar.selectbox("Number of Attention Heads", [4, 8, 16], index=1)
+        num_transformer_blocks = st.sidebar.slider("Transformer Blocks", 1, 6, 2)
+        ff_dim = st.sidebar.selectbox("Feed Forward Dimension", [64, 128, 256, 512], index=2)
+    else:  # Galformer
+        st.sidebar.subheader("Galformer Parameters")
+        d_model = st.sidebar.selectbox("Model Dimension", [256, 512, 768], index=1)
+        num_heads = st.sidebar.selectbox("Number of Attention Heads", [4, 8, 16], index=1)
+        factor = st.sidebar.slider("Autocorrelation Factor", 1, 5, 3)
+        label_len = st.sidebar.slider("Label Length", 24, 72, 48)
+        pred_len = st.sidebar.slider("Prediction Length", 12, 48, 24)
+        e_layers = st.sidebar.slider("Encoder Layers", 1, 4, 2)
+        d_layers = st.sidebar.slider("Decoder Layers", 1, 2, 1)
+        ff_dim = st.sidebar.selectbox("Feed Forward Dimension", [1024, 2048, 4096], index=1)
+    
+    # Initialize session state
     if 'df' not in st.session_state:
         st.session_state.df = None
-    if 'data_source' not in st.session_state:
-        st.session_state.data_source = data_source
+    if 'current_ticker' not in st.session_state:
+        st.session_state.current_ticker = None
     
-    # Reset dataframe if data source changed
-    if st.session_state.data_source != data_source:
-        st.session_state.df = None
-        st.session_state.data_source = data_source
+    # Sidebar status
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📊 Data Status")
+    if st.session_state.df is not None:
+        st.sidebar.success("✅ Data loaded and ready!")
+        if st.session_state.current_ticker:
+            st.sidebar.info(f"Current ticker: {st.session_state.current_ticker}")
+    else:
+        st.sidebar.warning("⚠️ No data loaded")
     
-    if data_source == "Upload CSV File":
-        st.subheader("📁 Upload Stock Data")
+    # Data loading section
+    st.markdown("---")
+    
+    # Handle different data sources
+    if data_source == "Generate Synthetic Data":
+        st.subheader("🎲 Generate Synthetic Stock Data")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            num_days = st.number_input("Number of days", 100, 5000, 1000)
+        with col2:
+            start_price = st.number_input("Starting price ($)", 10, 1000, 100)
+        
+        if st.button("🎲 Generate Data", type="primary"):
+            with st.spinner("Generating synthetic stock data..."):
+                st.session_state.df = generate_synthetic_stock_data(num_days, start_price)
+                st.session_state.current_ticker = "SYNTHETIC"
+                st.success(f"✅ Generated {len(st.session_state.df)} days of synthetic stock data")
+    
+    elif data_source == "Upload CSV File":
+        st.subheader("📁 Upload CSV File")
         st.info("Upload a CSV file with columns: Date, Open, High, Low, Close, Volume")
         
-        # Add a key to the uploader to help Streamlit manage state
-        uploaded_file = st.file_uploader("Choose a CSV file", type="csv", key="file_uploader")
+        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
         
         if uploaded_file is not None:
             try:
-                st.session_state.df = pd.read_csv(uploaded_file)
-                st.success(f"Data loaded successfully! Shape: {st.session_state.df.shape}")
+                df = pd.read_csv(uploaded_file)
                 
                 # Validate required columns
                 required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume']
-                missing_columns = [col for col in required_columns if col not in st.session_state.df.columns]
+                missing_columns = [col for col in required_columns if col not in df.columns]
                 
                 if missing_columns:
-                    st.error(f"Missing required columns: {missing_columns}")
-                    st.session_state.df = None
+                    st.error(f"Missing required columns: {', '.join(missing_columns)}")
+                    st.info("Please ensure your CSV has the following columns: Date, Open, High, Low, Close, Volume")
                 else:
-                    st.sidebar.success("✅ CSV file validated successfully!")
-                
+                    st.session_state.df = df
+                    st.session_state.current_ticker = "UPLOADED_CSV"
+                    st.success(f"✅ Successfully loaded {len(df)} rows of data")
+                    
             except Exception as e:
-                st.error(f"Error loading file: {str(e)}")
-                st.session_state.df = None
+                st.error(f"Error loading CSV file: {str(e)}")
     
     elif data_source == "Fetch Market Data (yfinance)":
-        # Display ticker selection interface
         has_tickers = display_ticker_data_interface()
-        
-        # Show enhanced features info for real market data
-        if has_tickers and model_type == "Enhanced Model (with selected features)":
-            st.info("💡 **Enhanced features available with real market data:**")
-            features_available = []
-            if enhance_volume_features:
-                features_available.append("✅ Enhanced Volume Features")
-            if include_market_indices:
-                features_available.append("✅ Market Indices (SPX, NASDAQ)")
-            else:
-                features_available.append("⚠️ Market Indices (enable in sidebar for market context)")
-            if include_industry_etf:
-                features_available.append("✅ Industry ETF Features")
-            else:
-                features_available.append("⚠️ Industry ETF Features (enable in sidebar for sector context)")
-            
-            for feature in features_available:
-                st.write(feature)
     
-    else:
-        st.subheader("🎲 Generate Synthetic Data")
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            num_days = st.number_input("Number of Days", 500, 2000, 1000, key="num_days")
-        with col2:
-            start_price = st.number_input("Starting Price", 50, 500, 100, key="start_price")
-        
-        if st.button("Generate Data", key="generate_data"):
-            with st.spinner("Generating synthetic stock data..."):
-                st.session_state.df = generate_synthetic_stock_data(num_days, start_price)
-                st.success(f"Synthetic data generated! Shape: {st.session_state.df.shape}")
-                
-                # Show a preview of available features when using enhanced model
-                if model_type == "Enhanced Model (with selected features)":
-                    st.info("💡 **Enhanced features available with synthetic data:**")
-                    features_available = ["✅ Enhanced Volume Features"]
-                    if not include_market_indices:
-                        features_available.append("❌ Market Indices (not available with synthetic data)")
-                    else:
-                        features_available.append("❌ Market Indices (would be available with real CSV data)")
-                    if not include_industry_etf:
-                        features_available.append("❌ Industry ETF Features (not available with synthetic data)")
-                    else:
-                        features_available.append("❌ Industry ETF Features (require real ticker data)")
-                    
-                    for feature in features_available:
-                        st.write(feature)
-    
-    # Check if data is available for training
-    if st.session_state.df is None:
-        st.info("ℹ️ Please load data first before training the model.")
-    
+    # Show data preview and proceed with training if data is available
     if st.session_state.df is not None:
-        # Assign the DataFrame from session state to a local variable for convenience
         df = st.session_state.df
         
-        # Debug info
-        st.sidebar.success(f"✅ Data loaded: {df.shape[0]} rows")
-        
-        # Show current ticker info if available
-        if hasattr(st.session_state, 'current_ticker'):
-            st.sidebar.info(f"📊 Current Ticker: **{st.session_state.current_ticker}**")
-            
-            # Add industry information if industry ETF features are enabled
-            if include_industry_etf:
-                try:
-                    ticker_info = get_ticker_industry_info(st.session_state.current_ticker)
-                    if ticker_info and ticker_info.get('industry_etf'):
-                        st.sidebar.info(f"🏭 Industry: **{ticker_info['industry']}**\n📈 ETF: **{ticker_info['industry_etf']}**")
-                except:
-                    pass
-            
-            # Add quick stats
-            current_price = df['Close'].iloc[-1]
-            price_change = df['Close'].iloc[-1] - df['Close'].iloc[-2] if len(df) > 1 else 0
-            price_change_pct = (price_change / df['Close'].iloc[-2]) * 100 if len(df) > 1 and df['Close'].iloc[-2] != 0 else 0
-            
-            st.sidebar.metric(
-                "Current Price", 
-                f"${current_price:.2f}",
-                f"{price_change:+.2f} ({price_change_pct:+.2f}%)"
-            )
-        
-        # Show current configuration
-        if model_type == "Enhanced Model (with selected features)":
-            config_info = "🔧 **Current Configuration:**\n"
-            config_info += f"- Model: Enhanced\n"
-            config_info += f"- Market Indices: {'✅' if include_market_indices else '❌'}\n"
-            config_info += f"- Volume Features: {'✅' if enhance_volume_features else '❌'}\n"
-            config_info += f"- Industry ETF: {'✅' if include_industry_etf else '❌'}\n"
-            st.sidebar.info(config_info)
-        else:
-            st.sidebar.info("🔧 **Current Configuration:**\n- Model: Basic (OHLCV only)")
-
-        # Display data preview
+        st.markdown("---")
         st.subheader("📊 Data Preview")
         
-        # Add download option and ticker info
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            if hasattr(st.session_state, 'current_ticker'):
-                st.write(f"**Data for: {st.session_state.current_ticker}**")
-        with col2:
-            if st.button("📥 Download Data", help="Download current dataset as CSV"):
-                filename = f"{st.session_state.current_ticker}_data.csv" if hasattr(st.session_state, 'current_ticker') else "stock_data.csv"
-                csv = df.to_csv(index=False)
-                st.download_button(
-                    label="Download CSV",
-                    data=csv,
-                    file_name=filename,
-                    mime="text/csv"
-                )
-        
-        st.dataframe(df.head(10))
-        
-        # Test market data fetching if enhanced features are enabled
-        if st.session_state.get('show_test_market_data', False):
-            st.subheader("🧪 Market Data Test")
-            if st.button("Test Market Data Fetch"):
-                if 'Date' in df.columns:
-                    start_date = pd.to_datetime(df['Date'].min())
-                    end_date = pd.to_datetime(df['Date'].max())
-                    spx_data, nasdaq_data = fetch_market_indices(start_date, end_date)
-                    if spx_data is not None:
-                        st.success("Market data fetching working correctly!")
-                        st.write("SPX sample:", spx_data.head())
-                        st.write("NASDAQ sample:", nasdaq_data.head())
-                    else:
-                        st.error("Market data fetching failed")
-                else:
-                    st.warning("No Date column found for market data test")
-        
-        # Toggle for test mode
-        if st.checkbox("🔧 Show Market Data Test", value=False):
-            st.session_state['show_test_market_data'] = True
-        else:
-            st.session_state['show_test_market_data'] = False
-        
-        # Display basic statistics
-        st.subheader("📈 Data Statistics")
+        # Show basic statistics
         col1, col2, col3, col4 = st.columns(4)
-        
         with col1:
             st.metric("Total Days", len(df))
         with col2:
-            st.metric("Average Close", f"${df['Close'].mean():.2f}")
+            st.metric("Latest Price", f"${df['Close'].iloc[-1]:.2f}")
         with col3:
-            st.metric("Min Close", f"${df['Close'].min():.2f}")
+            price_change = df['Close'].iloc[-1] - df['Close'].iloc[-2] if len(df) > 1 else 0
+            st.metric("Daily Change", f"${price_change:.2f}")
         with col4:
-            st.metric("Max Close", f"${df['Close'].max():.2f}")
+            st.metric("Avg Volume", f"{df['Volume'].mean():,.0f}")
         
-        # Plot price history
-        st.subheader("📉 Price History")
+        # Show data sample
+        st.write("**Data Sample:**")
+        st.dataframe(df.head(), use_container_width=True)
+        
+        # Show price chart
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(df.index, df['Close'])
-        
-        # Add ticker name to title if available
-        title = "Historical Closing Prices"
-        if hasattr(st.session_state, 'current_ticker'):
-            title = f"Historical Closing Prices - {st.session_state.current_ticker}"
-        
-        ax.set_title(title)
-        ax.set_xlabel("Days")
-        ax.set_ylabel("Price ($)")
+        ax.plot(df['Close'], label='Close Price')
+        ax.set_title('Stock Price History')
+        ax.set_xlabel('Days')
+        ax.set_ylabel('Price ($)')
+        ax.legend()
         ax.grid(True, alpha=0.3)
-        
-        # Format y-axis to show dollar signs
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:.2f}'))
-        
         st.pyplot(fig)
         
-        # Show ticker comparison if multiple tickers were fetched
-        if hasattr(st.session_state, 'all_ticker_data') and len(st.session_state.all_ticker_data) > 1:
-            st.subheader("📊 Ticker Performance Comparison")
-            comparison_fig = plot_ticker_comparison(
-                st.session_state.all_ticker_data, 
-                st.session_state.current_ticker if hasattr(st.session_state, 'current_ticker') else None
-            )
-            if comparison_fig:
-                st.pyplot(comparison_fig)
-        
-        # Train model button
-        if st.button("🚀 Train Transformer Model", type="primary"):
-            
-            with st.spinner("Preprocessing data..."):
-                # Choose preprocessing method based on model type
-                if model_type == "Enhanced Model (with selected features)":
-                    # Get ticker symbol for industry ETF features
-                    ticker_symbol = getattr(st.session_state, 'current_ticker', None)
-                    
-                    # Enhanced preprocessing with market context, volume features, and industry ETF
-                    scaled_data, scaler_features, scaler_target, enhanced_df, feature_names = load_and_preprocess_data_enhanced(
-                        df, 
-                        include_indices=include_market_indices, 
-                        enhance_volume=enhance_volume_features,
-                        include_industry_etf=include_industry_etf,
-                        ticker_symbol=ticker_symbol
-                    )
-                    
-                    st.info(f"Using enhanced features: {', '.join(feature_names)}")
-                    
-                    # Display enhanced feature info
-                    if include_market_indices and 'SPX_Close' in enhanced_df.columns:
-                        st.success("✅ Market indices (SPX, NASDAQ) successfully integrated!")
-                    elif include_market_indices:
-                        st.warning("⚠️ Market indices requested but not available (using synthetic data or no date column)")
-                    
-                    if enhance_volume_features:
-                        st.success("✅ Enhanced volume features integrated!")
-                    
-                    if include_industry_etf and 'Industry_ETF_Close' in enhanced_df.columns:
-                        st.success(f"✅ Industry ETF features integrated for {ticker_symbol}!")
-                    elif include_industry_etf and ticker_symbol:
-                        st.warning(f"⚠️ Industry ETF features requested but not available for {ticker_symbol}")
-                    elif include_industry_etf:
-                        st.warning("⚠️ Industry ETF features requested but no ticker symbol available")
-                
-                else:
-                    # Basic preprocessing
-                    scaled_data, scaler_features, scaler_target, enhanced_df = load_and_preprocess_data(df)
-                    feature_names = ['Open', 'High', 'Low', 'Close', 'Volume']
-                    st.info("Using basic OHLCV features")
-                
-                # Create sequences
-                X, y = create_sequences(scaled_data, sequence_length)
-                
-                # Split data
-                X_train, X_test, y_train, y_test = train_test_split_temporal(X, y)
-                
-                st.success(f"Data preprocessed! Training sequences: {len(X_train)}, Test sequences: {len(X_test)}")
-                st.info(f"Input shape: {X.shape}, Features: {len(feature_names)}")
-            
-            with st.spinner("Building Transformer model..."):
-                # Build model
-                input_shape = (sequence_length, X.shape[-1])
-                
-                model = build_transformer_model(
-                    input_shape=input_shape,
-                    head_size=64,
-                    num_heads=num_heads,
-                    ff_dim=ff_dim,
-                    num_transformer_blocks=num_transformer_blocks,
-                    mlp_units=[128, 64],
-                    dropout=0.1,
-                    mlp_dropout=0.1
-                )
-                
-                # Compile model
-                model.compile(
-                    optimizer=keras.optimizers.Adam(learning_rate=0.001),
-                    loss="mse",
-                    metrics=["mae"]
-                )
-                
-                st.success("Model built successfully!")
-                
-                # Display model summary
-                with st.expander("View Model Architecture"):
-                    model_summary = []
-                    model.summary(print_fn=lambda x: model_summary.append(x))
-                    st.text('\n'.join(model_summary))
-            
-            # Training progress
-            st.subheader("🏋️ Model Training")
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            # Custom callback to update Streamlit progress
-            class StreamlitCallback(keras.callbacks.Callback):
-                def __init__(self, progress_bar, status_text, total_epochs):
-                    self.progress_bar = progress_bar
-                    self.status_text = status_text
-                    self.total_epochs = total_epochs
-                
-                def on_epoch_end(self, epoch, logs=None):
-                    progress = (epoch + 1) / self.total_epochs
-                    self.progress_bar.progress(progress)
-                    self.status_text.text(f"Epoch {epoch + 1}/{self.total_epochs} - Loss: {logs['loss']:.4f} - MAE: {logs['mae']:.4f}")
-            
-            # Train model
-            callbacks = [
-                StreamlitCallback(progress_bar, status_text, epochs),
-                keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
-            ]
-            
-            history = model.fit(
-                X_train, y_train,
-                epochs=epochs,
-                batch_size=batch_size,
-                validation_split=0.2,
-                callbacks=callbacks,
-                verbose=0
-            )
-            
-            st.success("Model training completed!")
-            
-            # Plot training history
-            st.subheader("📊 Training History")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                ax.plot(history.history['loss'], label='Training Loss')
-                ax.plot(history.history['val_loss'], label='Validation Loss')
-                ax.set_title('Model Loss')
-                ax.set_xlabel('Epoch')
-                ax.set_ylabel('Loss')
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-                st.pyplot(fig)
-            
-            with col2:
-                fig, ax = plt.subplots(figsize=(8, 6))
-                ax.plot(history.history['mae'], label='Training MAE')
-                ax.plot(history.history['val_mae'], label='Validation MAE')
-                ax.set_title('Model MAE')
-                ax.set_xlabel('Epoch')
-                ax.set_ylabel('MAE')
-                ax.legend()
-                ax.grid(True, alpha=0.3)
-                st.pyplot(fig)
-            
-            # Make predictions
-            st.subheader("🎯 Model Predictions")
-            
-            with st.spinner("Generating predictions..."):
-                # Predict on test set
-                y_pred_scaled = model.predict(X_test, verbose=0)
-                
-                # Inverse transform predictions
-                y_pred = scaler_target.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
-                y_test_original = scaler_target.inverse_transform(y_test.reshape(-1, 1)).flatten()
-                
-                # Calculate metrics
-                rmse, mae, mape = calculate_metrics(y_test_original, y_pred)
-            
-            # Display metrics
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("RMSE", f"{rmse:.2f}")
-            with col2:
-                st.metric("MAE", f"{mae:.2f}")
-            with col3:
-                st.metric("MAPE", f"{mape:.2f}%")
-            
-            # Plot predictions
-            st.subheader("📈 Prediction Results")
-            
-            # Test set predictions
-            fig = plot_predictions(y_test_original, y_pred, "Test Set: Actual vs Predicted Prices")
-            st.pyplot(fig)
-            
-            # Training set predictions for comparison
-            if st.checkbox("Show Training Set Predictions"):
-                y_pred_train_scaled = model.predict(X_train, verbose=0)
-                y_pred_train = scaler_target.inverse_transform(y_pred_train_scaled.reshape(-1, 1)).flatten()
-                y_train_original = scaler_target.inverse_transform(y_train.reshape(-1, 1)).flatten()
-                
-                fig = plot_predictions(y_train_original, y_pred_train, "Training Set: Actual vs Predicted Prices")
-                st.pyplot(fig)
-            
-            # Future prediction
-            st.subheader("🔮 Next Day Prediction")
-            
-            # Use the last sequence to predict next day
-            last_sequence = X_test[-1].reshape(1, sequence_length, -1)
-            next_day_scaled = model.predict(last_sequence, verbose=0)
-            next_day_price = scaler_target.inverse_transform(next_day_scaled.reshape(-1, 1))[0, 0]
-            
-            current_price = enhanced_df['Close'].iloc[-1]
-            price_change = next_day_price - current_price
-            price_change_pct = (price_change / current_price) * 100
-            
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("Current Price", f"${current_price:.2f}")
-            with col2:
-                st.metric("Predicted Price", f"${next_day_price:.2f}", f"${price_change:.2f}")
-            with col3:
-                st.metric("Predicted Change", f"{price_change_pct:.2f}%")
-            
-            # Future Price Predictions
-            st.markdown("---")
-            st.subheader("📈 Future Price Predictions")
-            st.info("Configure the prediction settings below and click 'Generate Future Predictions' to forecast stock prices.")
-            
-            # Controls for future predictions
-            col1, col2 = st.columns(2)
-            with col1:
-                future_days = st.slider("Days to Predict", 7, 90, 30, key="future_days", 
-                                       help="Number of days into the future to predict")
-            with col2:
-                historical_context_days = st.slider("Historical Context Days", 30, 200, 100, key="context_days",
-                                                   help="Number of historical days to show for context in the chart")
-            
-            # Make the button more prominent
-            st.markdown("### 🔮 Generate Future Predictions")
-            if st.button("🔮 Generate Future Predictions", type="secondary", use_container_width=True):
-                with st.spinner(f"Predicting stock prices for the next {future_days} days..."):
-                    # Get the last sequence for prediction
-                    last_sequence_scaled = X_test[-1]  # This is already scaled
-                    
-                    # Predict future prices
-                    future_predictions = predict_future_prices(
-                        model, 
-                        last_sequence_scaled, 
-                        scaler_target, 
-                        num_days=future_days
-                    )
-                    
-                    # Get historical prices for context
-                    historical_prices = enhanced_df['Close'].values
-                    
-                    # Plot future predictions
-                    future_fig = plot_future_predictions(
-                        historical_prices, 
-                        future_predictions, 
-                        num_historical_days=historical_context_days,
-                        title=f"Stock Price Forecast - Next {future_days} Days"
-                    )
-                    
-                    st.pyplot(future_fig)
-                    
-                    # Display future prediction statistics
-                    st.subheader("📊 Future Prediction Analysis")
-                    
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("Predicted Min", f"${future_predictions.min():.2f}")
-                    with col2:
-                        st.metric("Predicted Max", f"${future_predictions.max():.2f}")
-                    with col3:
-                        st.metric("Predicted Mean", f"${future_predictions.mean():.2f}")
-                    with col4:
-                        volatility = np.std(future_predictions)
-                        st.metric("Predicted Volatility", f"${volatility:.2f}")
-                    
-                    # Show trend analysis
-                    trend_change = future_predictions[-1] - future_predictions[0]
-                    trend_pct = (trend_change / future_predictions[0]) * 100
-                    
-                    if trend_change > 0:
-                        st.success(f"📈 Predicted upward trend: +${trend_change:.2f} ({trend_pct:.1f}%) over {future_days} days")
-                    else:
-                        st.error(f"📉 Predicted downward trend: ${trend_change:.2f} ({trend_pct:.1f}%) over {future_days} days")
-                    
-                    # Show detailed predictions table
-                    with st.expander("View Detailed Predictions"):
-                        # Create future dates
-                        last_date = pd.to_datetime(enhanced_df['Date'].iloc[-1]) if 'Date' in enhanced_df.columns else pd.Timestamp.now()
-                        future_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=future_days, freq='D')
-                        
-                        predictions_df = pd.DataFrame({
-                            'Date': future_dates,
-                            'Predicted_Price': future_predictions,
-                            'Day_Change': np.concatenate([[0], np.diff(future_predictions)]),
-                            'Day_Change_Pct': np.concatenate([[0], np.diff(future_predictions) / future_predictions[:-1] * 100])
-                        })
-                        
-                        # Format the dataframe for display
-                        predictions_df['Predicted_Price'] = predictions_df['Predicted_Price'].apply(lambda x: f"${x:.2f}")
-                        predictions_df['Day_Change'] = predictions_df['Day_Change'].apply(lambda x: f"${x:.2f}")
-                        predictions_df['Day_Change_Pct'] = predictions_df['Day_Change_Pct'].apply(lambda x: f"{x:.2f}%")
-                        
-                        st.dataframe(predictions_df, use_container_width=True)
-            
-            # Model insights
-            st.subheader("💡 Model Insights")
-            
-            # Feature analysis
-            if model_type == "Enhanced Model (with selected features)":
-                feature_info = f"**Enhanced Model with {len(feature_names)} features:**\n"
-                feature_info += f"- Base features: {', '.join(['Open', 'High', 'Low', 'Close', 'Volume'])}\n"
+        # Enhanced features information
+        if model_type == "Enhanced Model (with selected features)":
+            with st.expander("ℹ️ Enhanced Features Information"):
+                feature_info = "**Enhanced model will include:**\n"
+                feature_info += "- Base OHLCV features\n"
                 
                 if enhance_volume_features:
-                    volume_feats = [f for f in feature_names if 'Volume' in f and f != 'Volume']
-                    if volume_feats:
-                        feature_info += f"- Volume features: {', '.join(volume_feats)}\n"
+                    feature_info += "- Enhanced volume features (moving averages, ratios, momentum)\n"
                 
-                if include_market_indices and any('SPX' in f or 'NASDAQ' in f for f in feature_names):
-                    market_feats = [f for f in feature_names if 'SPX' in f or 'NASDAQ' in f]
-                    feature_info += f"- Market features: {', '.join(market_feats)}\n"
+                if include_market_indices and data_source == "Fetch Market Data (yfinance)":
+                    feature_info += "- Market indices data (SPX, NASDAQ correlations)\n"
+                elif include_market_indices:
+                    feature_info += "- Market indices (not available for synthetic/uploaded data)\n"
                 
-                if include_industry_etf and any('Industry_ETF' in f for f in feature_names):
-                    industry_feats = [f for f in feature_names if 'Industry_ETF' in f or 'Industry' in f]
-                    feature_info += f"- Industry ETF features: {', '.join(industry_feats)}\n"
+                if include_industry_etf and data_source == "Fetch Market Data (yfinance)" and st.session_state.current_ticker:
+                    feature_info += f"- Industry ETF features for {st.session_state.current_ticker}\n"
+                elif include_industry_etf:
+                    feature_info += "- Industry ETF features (only available for real tickers)\n"
                 
                 st.info(feature_info)
-            
-            st.info(f"""
-            **Model Performance Summary:**
-            - The Transformer model was trained on {len(X_train)} sequences using {sequence_length} days of historical data
-            - Test set RMSE: ${rmse:.2f} (lower is better)
-            - Test set MAE: ${mae:.2f} (average prediction error)
-            - Test set MAPE: {mape:.2f}% (percentage error)
-            
-            **Architecture Details:**
-            - {num_transformer_blocks} Transformer encoder blocks
-            - {num_heads} attention heads
-            - {ff_dim} feed-forward dimension
-            - Trained for {len(history.history['loss'])} epochs
-            - Input features: {len(feature_names)}
-            """)
-            
-            if mape < 5:
-                st.success("🎉 Excellent model performance! MAPE < 5%")
-            elif mape < 10:
-                st.warning("⚠️ Good model performance, but could be improved. MAPE < 10%")
-            else:
-                st.error("❌ Model performance needs improvement. Consider tuning hyperparameters.")
+        
+        # Training section
+        st.markdown("---")
+        st.subheader("🚀 Train Transformer Model")
+        
+        if st.button("🚀 Train Transformer Model", type="primary", use_container_width=True):
+            with st.spinner("Training model... This may take a few minutes."):
+                
+                # Data preprocessing
+                if model_type == "Enhanced Model (with selected features)":
+                    # Only use enhanced features for real market data
+                    use_indices = include_market_indices and data_source == "Fetch Market Data (yfinance)"
+                    use_industry = include_industry_etf and data_source == "Fetch Market Data (yfinance)" and st.session_state.current_ticker
+                    
+                    scaled_data, scaler_features, scaler_target, enhanced_df, feature_names = load_and_preprocess_data_enhanced(
+                        df, 
+                        include_indices=use_indices, 
+                        enhance_volume=enhance_volume_features,
+                        include_industry_etf=use_industry,
+                        ticker_symbol=st.session_state.current_ticker if st.session_state.current_ticker not in ['SYNTHETIC', 'UPLOADED_CSV'] else None
+                    )
+                    
+                    st.success(f"Enhanced preprocessing complete! Using {len(feature_names)} features: {', '.join(feature_names)}")
+                else:
+                    scaled_data, scaler_features, scaler_target, enhanced_df = load_and_preprocess_data(df)
+                    feature_names = ['Open', 'High', 'Low', 'Close', 'Volume']
+                    st.success("Basic preprocessing complete! Using standard OHLCV features.")
+                
+                # Create sequences based on model architecture
+                if model_architecture == "Galformer (Advanced)":
+                    # Galformer sequences
+                    X_enc, X_dec, y = create_sequences_for_galformer(
+                        scaled_data, sequence_length, label_len, pred_len
+                    )
+                    
+                    # Split data
+                    X_enc_train, X_enc_test, X_dec_train, X_dec_test, y_train, y_test = train_test_split_temporal_galformer(
+                        X_enc, X_dec, y
+                    )
+                    
+                    st.success(f"Galformer data prepared! Training sequences: {len(X_enc_train)}")
+                    
+                    # Build Galformer model
+                    input_shape = (sequence_length, X_enc.shape[-1])
+                    
+                    model = build_galformer_model(
+                        input_shape=input_shape,
+                        d_model=d_model,
+                        n_heads=num_heads,
+                        e_layers=e_layers,
+                        d_layers=d_layers,
+                        d_ff=ff_dim,
+                        factor=factor,
+                        dropout=0.1,
+                        label_len=label_len,
+                        pred_len=pred_len
+                    )
+                    
+                    model.compile(
+                        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+                        loss='mse',
+                        metrics=['mae']
+                    )
+                    
+                    st.success("Galformer model built successfully!")
+                    st.info(f"Model input shapes: Encoder {X_enc_train.shape}, Decoder {X_dec_train.shape}")
+                    
+                    # Train model
+                    callbacks = [
+                        keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
+                    ]
+                    
+                    history = model.fit(
+                        [X_enc_train, X_dec_train], y_train,
+                        epochs=epochs,
+                        batch_size=batch_size,
+                        validation_split=0.2,
+                        callbacks=callbacks,
+                        verbose=0
+                    )
+                    
+                    # Make predictions
+                    y_pred = model.predict([X_enc_test, X_dec_test], verbose=0)
+                    
+                    # For Galformer, we need to handle the sequence predictions differently
+                    if len(y_pred.shape) > 1 and y_pred.shape[1] > 1:
+                        # Take the first prediction from each sequence
+                        y_pred_single = y_pred[:, 0]
+                        y_test_single = y_test[:, 0]
+                    else:
+                        y_pred_single = y_pred.flatten()
+                        y_test_single = y_test.flatten()
+                    
+                    # Inverse transform
+                    y_pred_original = scaler_target.inverse_transform(y_pred_single.reshape(-1, 1)).flatten()
+                    y_test_original = scaler_target.inverse_transform(y_test_single.reshape(-1, 1)).flatten()
+                    
+                else:
+                    # Standard Transformer
+                    X, y = create_sequences(scaled_data, sequence_length)
+                    X_train, X_test, y_train, y_test = train_test_split_temporal(X, y)
+                    
+                    st.success(f"Standard Transformer data prepared! Training sequences: {len(X_train)}")
+                    
+                    # Build model
+                    input_shape = (sequence_length, X.shape[-1])
+                    
+                    model = build_transformer_model(
+                        input_shape=input_shape,
+                        head_size=64,
+                        num_heads=num_heads,
+                        ff_dim=ff_dim,
+                        num_transformer_blocks=num_transformer_blocks,
+                        mlp_units=[128, 64],
+                        dropout=0.1,
+                        mlp_dropout=0.1
+                    )
+                    
+                    model.compile(
+                        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+                        loss='mse',
+                        metrics=['mae']
+                    )
+                    
+                    st.success("Standard Transformer model built successfully!")
+                    
+                    # Train model
+                    callbacks = [
+                        keras.callbacks.EarlyStopping(patience=10, restore_best_weights=True)
+                    ]
+                    
+                    history = model.fit(
+                        X_train, y_train,
+                        epochs=epochs,
+                        batch_size=batch_size,
+                        validation_split=0.2,
+                        callbacks=callbacks,
+                        verbose=0
+                    )
+                    
+                    # Make predictions
+                    y_pred_scaled = model.predict(X_test, verbose=0)
+                    y_pred_original = scaler_target.inverse_transform(y_pred_scaled.reshape(-1, 1)).flatten()
+                    y_test_original = scaler_target.inverse_transform(y_test.reshape(-1, 1)).flatten()
+                
+                st.success("Model training completed!")
+                
+                # Calculate metrics
+                rmse, mae, mape = calculate_metrics(y_test_original, y_pred_original)
+                
+                # Display results
+                st.subheader("📊 Training Results")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("RMSE", f"{rmse:.2f}")
+                with col2:
+                    st.metric("MAE", f"{mae:.2f}")
+                with col3:
+                    st.metric("MAPE", f"{mape:.2f}%")
+                
+                # Plot results
+                if model_architecture == "Galformer (Advanced)":
+                    fig = plot_galformer_predictions(y_test_original.reshape(-1, 1), y_pred_original.reshape(-1, 1))
+                else:
+                    fig = plot_predictions(y_test_original, y_pred_original)
+                
+                st.pyplot(fig)
+                
+                # Future predictions
+                st.subheader("🔮 Future Price Predictions")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    future_days = st.slider("Days to Predict", 7, 90, 30)
+                with col2:
+                    historical_context_days = st.slider("Historical Context Days", 30, 200, 100)
+                
+                if st.button("🔮 Generate Future Predictions", type="secondary"):
+                    with st.spinner(f"Predicting next {future_days} days..."):
+                        if model_architecture == "Standard Transformer":
+                            last_sequence_scaled = X_test[-1]
+                            future_predictions = predict_future_prices(
+                                model, last_sequence_scaled, scaler_target, num_days=future_days
+                            )
+                        else:
+                            # For Galformer, use the encoder-decoder prediction
+                            last_enc_sequence = X_enc_test[-1:] 
+                            last_dec_sequence = X_dec_test[-1:]
+                            
+                            # Predict multiple steps at once
+                            future_pred_scaled = model.predict([last_enc_sequence, last_dec_sequence], verbose=0)
+                            if len(future_pred_scaled.shape) > 1:
+                                future_predictions = scaler_target.inverse_transform(
+                                    future_pred_scaled[0][:future_days].reshape(-1, 1)
+                                ).flatten()
+                            else:
+                                future_predictions = scaler_target.inverse_transform(
+                                    future_pred_scaled[:future_days].reshape(-1, 1)
+                                ).flatten()
+                        
+                        historical_prices = enhanced_df['Close'].values
+                        
+                        future_fig = plot_future_predictions(
+                            historical_prices, 
+                            future_predictions,
+                            num_historical_days=historical_context_days,
+                            title=f"{model_architecture} - Next {future_days} Days Forecast"
+                        )
+                        
+                        st.pyplot(future_fig)
+                        
+                        # Future prediction stats
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric("Predicted Min", f"${future_predictions.min():.2f}")
+                        with col2:
+                            st.metric("Predicted Max", f"${future_predictions.max():.2f}")
+                        with col3:
+                            st.metric("Predicted Mean", f"${future_predictions.mean():.2f}")
+                        with col4:
+                            volatility = np.std(future_predictions)
+                            st.metric("Volatility", f"${volatility:.2f}")
+    
+    else:
+        st.info("👆 Please select a data source and load data to begin training.")
 
 if __name__ == "__main__":
     main()
